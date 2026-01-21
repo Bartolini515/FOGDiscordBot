@@ -94,7 +94,7 @@ class AttendanceCog(commands.Cog):
                 await interaction.channel.send(f"Drużyna **{squad_name}** nie ma obecnych członków.")
                 
         await interaction.channel.send(message_content)
-        channel = self.bot.get_channel(int(self.bot.channels["attendance_channel_id"]))
+        channel = self.bot.get_channel(self.bot.channels["attendance_channel_id"])
         await channel.send(message_content)
         await interaction.response.send_message("Obecność została zapisana.", ephemeral=True)
         logger.info(f"Attendance for mission {mission_name} ({mission_date}) recorded by {interaction.user.name}.")
