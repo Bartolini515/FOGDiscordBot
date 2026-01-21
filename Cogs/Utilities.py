@@ -273,7 +273,6 @@ class Utilities(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
 
-        
         categories = self.bot.ticket_system.get("ticket_categories", [])
         if not categories:
             await interaction.response.send_message("Brak dostępnych kategorii ticketów.", ephemeral=True)
@@ -354,8 +353,169 @@ class Utilities(commands.Cog):
         
         
     # =========== Trigger Messages section ===========
-    # /triggers_list
     # TODO: Implement list, add, delete, edit
+    # /triggers_list
+    # TODO: Test this
+    @app_commands.command(
+        name="triggers_list",
+        description="Wyświetl zdefiniowane wiadomości wyzwalające",
+        extras={"category": "Administracja"},
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def triggers_list(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
+            return
+
+        triggers = self.bot.message_triggers
+        if not triggers:
+            await interaction.response.send_message("Brak zdefiniowanych wiadomości wyzwalających.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="Zdefiniowane wiadomości wyzwalające",
+            color=discord.Color.blue()
+        )
+
+        for trigger in triggers:
+            keyword = trigger.get("keyword", "Brak")
+            response = trigger.get("response", "Brak")
+            case_sensitive = trigger.get("case_sensitive", False)
+            whole_word = trigger.get("whole_word", False)
+            channels = trigger.get("channels", [])
+            roles = trigger.get("roles", [])
+            enabled = trigger.get("enabled", True)
+            cooldown_seconds = trigger.get("cooldown_seconds", 0)
+            description = trigger.get("description", "Brak opisu")
+
+            channels_str = ", ".join(f"<#{cid}>" for cid in channels) if channels else "Wszystkie"
+            roles_str = ", ".join(f"<@&{rid}>" for rid in roles) if roles else "Wszystkie"
+
+            embed.add_field(
+            name=f"Trigger: {keyword}",
+            value=(
+                f"**Response:** {response}\n"
+                f"**Case sensitive:** {case_sensitive}\n"
+                f"**Whole word:** {whole_word}\n"
+                f"**Enabled:** {enabled}\n"
+                f"**Cooldown:** {cooldown_seconds}s\n"
+                f"**Channels:** {channels_str}\n"
+                f"**Roles:** {roles_str}\n"
+                f"**Description:** {description}"
+            ),
+            inline=False,
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    # /triggers_add
+    # TODO: Test this
+    @app_commands.command(
+        name="triggers_add",
+        description="Dodaj nową wiadomość wyzwalającą",
+        extras={"category": "Administracja"},
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(
+        keyword="Słowo kluczowe wyzwalające",
+        response="Odpowiedź bota na wyzwolenie",
+        case_sensitive="Czy rozróżniać wielkość liter",
+        whole_word="Czy dopasować całe słowo",
+        enabled="Czy wyzwalacz jest włączony",
+        cooldown_seconds="Czas odnowienia wyzwalacza (w sekundach)",
+        description="Opis wyzwalacza"
+    )
+    async def triggers_add(self, interaction: discord.Interaction, keyword: str, response: str, case_sensitive: bool = False, whole_word: bool = False, enabled: bool = True, cooldown_seconds: int = 0, description: str = ""):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
+            return
+
+        new_trigger = {
+            "keyword": keyword,
+            "response": response,
+            "case_sensitive": case_sensitive,
+            "whole_word": whole_word,
+            "enabled": enabled,
+            "cooldown_seconds": cooldown_seconds,
+            "description": description
+        }
+
+        self.bot.message_triggers.append(new_trigger)
+        await interaction.response.send_message(f"Nowa wiadomość wyzwalająca została dodana: {keyword}", ephemeral=True)
+        
+    # /triggers_edit
+    # TODO: Test this
+    @app_commands.command(
+        name="triggers_edit",
+        description="Edytuj istniejącą wiadomość wyzwalającą",
+        extras={"category": "Administracja"},
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(
+        keyword="Słowo kluczowe wyzwalające do edycji",
+        new_response="Nowa odpowiedź bota (opcjonalne)",
+        new_case_sensitive="Nowa wartość rozróżniania wielkości liter (opcjonalne)",
+        new_whole_word="Nowa wartość dopasowania całego słowa (opcjonalne)",
+        new_enabled="Nowa wartość włączenia wyzwalacza (opcjonalne)",
+        new_cooldown_seconds="Nowa wartość czasu odnowienia wyzwalacza (w sekundach) (opcjonalne)",
+        new_description="Nowy opis wyzwalacza (opcjonalne)"
+    )
+    async def triggers_edit(self, interaction: discord.Interaction, keyword: str, new_response: str = None, new_case_sensitive: bool = None, new_whole_word: bool = None, new_enabled: bool = None, new_cooldown_seconds: int = None, new_description: str = None):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
+            return
+
+        for trigger in self.bot.message_triggers:
+            if trigger.get("keyword") == keyword:
+                if new_response is not None:
+                    trigger["response"] = new_response
+                if new_case_sensitive is not None:
+                    trigger["case_sensitive"] = new_case_sensitive
+                if new_whole_word is not None:
+                    trigger["whole_word"] = new_whole_word
+                if new_enabled is not None:
+                    trigger["enabled"] = new_enabled
+                if new_cooldown_seconds is not None:
+                    trigger["cooldown_seconds"] = new_cooldown_seconds
+                if new_description is not None:
+                    trigger["description"] = new_description
+
+                await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' została zaktualizowana.", ephemeral=True)
+                return
+
+        await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' nie została znaleziona.", ephemeral=True)
+        
+    # /triggers_remove
+    # TODO: Test this
+    @app_commands.command(
+        name="triggers_remove",
+        description="Usuń istniejącą wiadomość wyzwalającą",
+        extras={"category": "Administracja"},
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(
+        keyword="Słowo kluczowe wyzwalające do usunięcia"
+    )
+    async def triggers_remove(self, interaction: discord.Interaction, keyword: str):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
+            return
+        
+        for trigger in self.bot.message_triggers:
+            if trigger.get("keyword") == keyword:
+                self.bot.message_triggers.remove(trigger)
+                await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' została usunięta.", ephemeral=True)
+                return
+
+        await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' nie została znaleziona.", ephemeral=True)
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(Utilities(bot))

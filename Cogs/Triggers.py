@@ -7,7 +7,6 @@ class Triggers(commands.Cog):
     """Custom actions triggered by key words in messages."""
     def __init__(self, bot:commands.Bot):
         self.bot = bot
-        self.message_triggers = bot.message_triggers
         self.last_triggered_times = {} 
     
     @commands.Cog.listener()
@@ -40,10 +39,12 @@ class Triggers(commands.Cog):
         # if message.content.lower().find("ukrainiec") != -1:
         #     await message.channel.send("https://tenor.com/view/fish-sleeping-gif-7324897647942850226")
         
-        if not self.message_triggers:
-            return
         
-        for trigger in self.message_triggers: # Iterate through each trigger
+        
+        if not self.bot.message_triggers:
+            return
+
+        for trigger in self.bot.message_triggers: # Iterate through each trigger
             if not trigger.get("enabled", False): # Skip if trigger is not enabled
                 continue
             
