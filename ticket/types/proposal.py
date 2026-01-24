@@ -1,3 +1,6 @@
+import discord
+
+
 class ProposalTicketType:
     type_name = "proposal"
 
@@ -6,7 +9,7 @@ class ProposalTicketType:
             f"💡 **Ticket propozycji**\n"
             f"Użytkownik: {user.mention}\n"
             f"Tytuł: **{title}**\n\n"
-            "Opisz proszę swoją propozycję."
+            "Opisz proszę swoją propozycję. Pierwsza wiadomość w tym kanale będzie traktowana jako opis propozycji."
         )
 
     def get_closed_message(self) -> str:
@@ -14,3 +17,32 @@ class ProposalTicketType:
 
     def get_reopened_message(self) -> str:
         return "Ticket propozycji został ponownie otwarty."
+    
+    async def customize_open_view(self, view, bot, interaction, channel, category, title):
+        view.add_item(self.ProposalForwardButton(bot, channel.id, title))
+    
+    
+            
+    
+class ProposalForwardButton(discord.ui.Button):
+        def __init__(self, bot, channel_id, title):
+            super().__init__(
+                label="Przekaż propozycję do głosowania",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"ticket_proposal_forward_{channel_id}",
+            )
+            self.bot = bot
+            self.channel_id = channel_id
+            self.title = title
+            self.proposal_channel_id = bot.channels.get("proposals_channel_id")
+
+        async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+            embed = discord.Embed(
+                title="Nowa propozycja do głosowania",
+                description=f"**Tytuł:** {self.title}\n**Użytkownik:** {interaction.user.mention}\n\n",
+                color=discord.Color.green(),
+            )
+            
+            await interaction.followup.send("Propozycja przekazana.", ephemeral=True)
+

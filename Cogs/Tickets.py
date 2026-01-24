@@ -130,7 +130,25 @@ class TicketsCog(commands.Cog):
 
         handler = core.get_type_handler(category.type_name)
         view = TicketOpenView(channel_id=channel.id)
+        if hasattr(handler, "customize_open_view"):
+            await handler.customize_open_view(
+                view=view,
+                bot=self.bot,
+                interaction=interaction,
+                channel=channel,
+                category=category,
+                title=title,
+            )
         await channel.send(content=handler.get_open_message(interaction.user, title), view=view)
+
+        if hasattr(handler, "on_ticket_created"):
+            await handler.on_ticket_created(
+                bot=self.bot,
+                interaction=interaction,
+                channel=channel,
+                category=category,
+                title=title,
+            )
 
         if channel.id not in self._registered_ticket_views:
             self.bot.add_view(view)
