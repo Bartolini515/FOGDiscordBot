@@ -10,18 +10,31 @@ import os
 from db.database import Database
 from db.models import Users
 
-# Get configuration.json
-# TODO: At End
-# if not os.path.exists("configuration.json"):
-#     with open("configuration.json", "w", encoding="utf-8") as config:
-#         json.dump({
-#             "prefix": "",
-#             "owner_id": 0,
-#             "guild_id": 0
-#             }, config, indent=4)
-#         print("Created default configuration.json, please edit it and restart the bot.")
-#         exit()
+# Create configuration file if it doesn't exist
+if not os.path.exists("configuration.json"):
+    with open("configuration.json", "w", encoding="utf-8") as config:
+        json.dump({
+            "prefix": "!",
+            "owner_id": 0,
+            "guild_id": 0,
+            "permissions": {},
+            "technical_info": {},
+            "channels": {},
+            "roles": {},
+            "ticket_system": {},
+            "message_triggers": []
+            }, config, indent=4)
+        print("Created default configuration.json, please edit it and restart the bot.")
+        exit()
 
+# Create .env file if it doesn't exist
+if not os.path.exists(".env"):
+    with open(".env", "w", encoding="utf-8") as env:
+        env.write("DISCORD_BOT_TOKEN=\nDEBUG=False\n")
+        print("Created default .env, please edit it and restart the bot.")
+        exit()
+
+# Load configuration file
 with open("configuration.json", "r", encoding="utf-8") as config: 
     data = json.load(config)
     prefix = data["prefix"]
