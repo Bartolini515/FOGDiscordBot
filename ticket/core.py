@@ -10,6 +10,8 @@ from db.models import Tickets, TicketTypes, TicketCreateMessages
 from ticket.types.mission import MissionTicketType
 from ticket.types.proposal import ProposalTicketType
 from ticket.types.custom import CustomTicketType
+from ticket.types.recruitment import RecruitmentTicketType
+from ticket.types.basic_training import BasicTrainingTicketType
 
 
 logger = logging.getLogger("fogbot")
@@ -21,11 +23,14 @@ class TicketCategory:
     description: str
     type_name: str
     category_id: int
+    prompt_for_title: bool = True
 
 
 TYPE_HANDLERS = {
     "mission": MissionTicketType(),
     "proposal": ProposalTicketType(),
+    "recruitment": RecruitmentTicketType(),
+    "basic_training": BasicTrainingTicketType(),
     "custom": CustomTicketType(),
 }
 
@@ -44,13 +49,27 @@ def get_category_from_config(bot: discord.Client, category_name: str) -> TicketC
     categories = getattr(bot, "ticket_system", {}).get("ticket_categories", [])
     for category in categories:
         if str(category.get("name", "")).casefold() == category_name.casefold():
+            prompt_for_title = bool(category.get("prompt_title", True))
             return TicketCategory(
                 name=category.get("name", category_name),
                 description=category.get("description", ""),
                 type_name=category.get("type", "custom"),
                 category_id=int(category.get("category_id", 0) or 0),
+                prompt_for_title=prompt_for_title,
             )
     return None
+
+
+def build_generic_title(category: TicketCategory, user: discord.abc.User) -> str:
+    display_name = getattr(user, "display_name", None) or getattr(user, "name", None) or "User"
+    base = f"{category.name} - {display_name}".strip()
+    suffix = str(user.id)[-4:]
+    if suffix:
+        base = f"{base} - {suffix}" if base else suffix
+
+    trimmed = base[:80] if len(base) > 80 else base
+    fallback = f"{category.name} Ticket".strip() or "Ticket"
+    return trimmed or fallback
 
 
 def get_type_handler(type_name: str):

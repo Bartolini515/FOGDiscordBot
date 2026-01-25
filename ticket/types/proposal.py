@@ -44,5 +44,28 @@ class ProposalForwardButton(discord.ui.Button):
                 color=discord.Color.green(),
             )
             
+            channel = self.bot.get_channel(self.channel_id)
+            description_text = None
+
+            if channel is not None:
+                msgs = [m async for m in channel.history(limit=2, oldest_first=True)]
+                if len(msgs) >= 2:
+                    description_text = msgs[1].content
+
+            if not description_text or not description_text.strip():
+                description_text = "Brak opisu."
+
+            embed.add_field(
+                name="Opis",
+                value=description_text[:1024],
+                inline=False,
+            )
+            
+            proposal_channel = self.bot.get_channel(self.proposal_channel_id)
+            if proposal_channel is None:
+                proposal_channel = await self.bot.fetch_channel(self.proposal_channel_id)
+
+            await proposal_channel.send(embed=embed)
+            
             await interaction.followup.send("Propozycja przekazana.", ephemeral=True)
 

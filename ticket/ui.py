@@ -38,7 +38,11 @@ class TicketCreateButton(discord.ui.Button):
         self.category_name = category_name
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(TicketTitleModal(category_name=self.category_name))
+        cog = interaction.client.get_cog("TicketsCog")
+        if cog is None:
+            await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
+            return
+        await cog._start_ticket_creation(interaction=interaction, category_name=self.category_name)
 
 
 class TicketCreateSelect(discord.ui.Select):
@@ -55,7 +59,11 @@ class TicketCreateSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         selected = self.values[0]
-        await interaction.response.send_modal(TicketTitleModal(category_name=selected))
+        cog = interaction.client.get_cog("TicketsCog")
+        if cog is None:
+            await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
+            return
+        await cog._start_ticket_creation(interaction=interaction, category_name=selected)
 
 
 class TicketCreateButtonView(discord.ui.View):

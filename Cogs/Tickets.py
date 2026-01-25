@@ -13,6 +13,7 @@ from ticket.ui import (
     TicketCreateSelectView,
     TicketOpenView,
     TicketClosedView,
+    TicketTitleModal,
 )
 
 
@@ -87,6 +88,23 @@ class TicketsCog(commands.Cog):
         except Exception as e:
             logger.exception("Error while restoring ticket views", exc_info=e)
 
+    async def _start_ticket_creation(self, interaction: discord.Interaction, category_name: str):
+        category = core.get_category_from_config(self.bot, category_name)
+        if not category:
+            await interaction.response.send_message("Nie znaleziono takiej kategorii ticketów.", ephemeral=True)
+            return
+
+        if category.prompt_for_title:
+            await interaction.response.send_modal(TicketTitleModal(category_name=category.name))
+            return
+
+        generic_title = core.build_generic_title(category, interaction.user)
+        await self._handle_ticket_title_submit(
+            interaction=interaction,
+            category_name=category.name,
+            title=generic_title,
+        )
+
     async def _handle_ticket_title_submit(self, interaction: discord.Interaction, category_name: str, title: str):
         if not hasattr(self.bot, "db") or self.bot.db is None:
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
@@ -96,6 +114,11 @@ class TicketsCog(commands.Cog):
         if not category:
             await interaction.response.send_message("Nie znaleziono takiej kategorii ticketów.", ephemeral=True)
             return
+
+        normalized_title = title.strip()
+        if not normalized_title:
+            normalized_title = core.build_generic_title(category, interaction.user)
+        title = normalized_title
 
         type_id = await core.get_ticket_type_id(self.bot.db, category.type_name)
         if type_id is None:

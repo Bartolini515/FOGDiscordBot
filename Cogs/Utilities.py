@@ -301,15 +301,16 @@ class Utilities(commands.Cog):
     @app_commands.describe(
         name="Nazwa nowej kategorii ticketów",
         description="Opis nowej kategorii ticketów",
-        category="Kategoria Discord do przypisania ticketów"
+        category="Kategoria Discord do przypisania ticketów",
+        prompt_title="Czy wymagać tytułu ticketu"
     )
-    async def ticket_categories_add(self, interaction: discord.Interaction, name: str, description: str, category: discord.CategoryChannel):
+    async def ticket_categories_add(self, interaction: discord.Interaction, name: str, description: str, category: discord.CategoryChannel, prompt_title: bool = True):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
 
         categories = self.bot.ticket_system.get("ticket_categories", [])
-        categories.append({"name": name, "description": description, "type": "custom", "category_id": category.id})
+        categories.append({"name": name, "description": description, "type": "custom", "category_id": category.id, "prompt_title": prompt_title})
         self.bot.ticket_system["ticket_categories"] = categories
 
         await interaction.response.send_message(f"Kategoria ticketów '{name}' została dodana.", ephemeral=True)
@@ -353,7 +354,6 @@ class Utilities(commands.Cog):
         
         
     # =========== Trigger Messages section ===========
-    # TODO: Implement list, add, delete, edit
     # /triggers_list
     # TODO: Test this
     @app_commands.command(

@@ -134,4 +134,6 @@ OR IGNORE INTO ticket_types (id, name)
 VALUES
     (1, 'mission'),
     (2, 'proposal'),
-    (3, 'custom');
+    (3, 'recruitment'),
+    (4, 'basic_training'),
+    (5, 'custom');
