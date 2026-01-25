@@ -1,7 +1,11 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+from os import getenv
+import logging
 
+logger = logging.getLogger("fogbot")
+debug = getenv("DEBUG", "False") == "True"
 
 class Triggers(commands.Cog):
     """Custom actions triggered by key words in messages."""
@@ -40,44 +44,64 @@ class Triggers(commands.Cog):
         #     await message.channel.send("https://tenor.com/view/fish-sleeping-gif-7324897647942850226")
         
         
+        if debug:
+            logger.debug(f"Message content: {message.content}")
+            logger.debug(f"Available triggers: {self.bot.message_triggers}")
+            logger.debug(f"last_triggered_times: {self.last_triggered_times}")
         
         if not self.bot.message_triggers:
             return
 
         for trigger in self.bot.message_triggers: # Iterate through each trigger
             if not trigger.get("enabled", False): # Skip if trigger is not enabled
+                if debug:
+                    logger.debug(f"Trigger '{trigger.get('keyword', '')}' is not enabled, skipping.")
                 continue
             
             if trigger.get("case_sensitive", False): # Check case sensitivity
+                if debug:
+                    logger.debug(f"Trigger '{trigger.get('keyword', '')}' is case sensitive.")
                 keyword = trigger.get("keyword", "")
             else:
                 keyword = trigger.get("keyword", "").lower()
             
             if keyword == "": # Skip if keyword is empty
+                if debug:
+                    logger.debug("Trigger keyword is empty, skipping.")
                 continue
             
-            if trigger.get("channels", []) is not None and message.channel.id not in trigger.get("channels", []): # Check channel restrictions
-                continue
+            # if len(trigger.get("channels", [])) > 0 and message.channel.id not in trigger.get("channels", []): # Check channel restrictions
+            #     if debug:
+            #         logger.debug(f"Trigger '{keyword}' is not allowed in this channel, skipping.")
+            #     continue
             
-            if trigger.get("roles", []) is not None: # Check role restrictions
-                has_role = False
-                for role in message.author.roles:
-                    if role.id in trigger.get("roles", []):
-                        has_role = True
-                        break
-                if not has_role:
-                    continue
+            # if len(trigger.get("roles", [])) > 0: # Check role restrictions
+            #     if debug:
+            #         logger.debug(f"Trigger '{keyword}' has role restrictions, checking user roles.")
+            #     has_role = False
+            #     for role in message.author.roles:
+            #         if role.id in trigger.get("roles", []):
+            #             has_role = True
+            #             break
+            #     if not has_role:
+            #         continue
                 
             cooldown_seconds = trigger.get("cooldown_seconds", 0)
             if cooldown_seconds > 0: # Check cooldown
                 last_triggered_time = self.last_triggered_times.get(keyword, 0)
                 current_time = discord.utils.utcnow().timestamp()
                 if current_time - last_triggered_time < cooldown_seconds:
+                    if debug:
+                        logger.debug(f"Trigger '{keyword}' is on cooldown, skipping.")
                     continue
                 self.last_triggered_times[keyword] = current_time
             
             content_to_check = message.content if trigger.get("case_sensitive", False) else message.content.lower() # Prepare content for checking based on case sensitivity
+            if debug:
+                logger.debug(f"Content to check for trigger '{keyword}': {content_to_check}")
             if trigger.get("whole_word", False): # Check the word based on whole word match setting
+                if debug:
+                    logger.debug(f"Trigger '{keyword}' requires whole word match.")
                 words = content_to_check.split()
                 if keyword in words:
                     response = trigger.get("response", "")

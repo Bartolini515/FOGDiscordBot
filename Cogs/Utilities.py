@@ -384,25 +384,25 @@ class Utilities(commands.Cog):
             response = trigger.get("response", "Brak")
             case_sensitive = trigger.get("case_sensitive", False)
             whole_word = trigger.get("whole_word", False)
-            channels = trigger.get("channels", [])
-            roles = trigger.get("roles", [])
+            # channels = trigger.get("channels", [])
+            # roles = trigger.get("roles", [])
             enabled = trigger.get("enabled", True)
             cooldown_seconds = trigger.get("cooldown_seconds", 0)
             description = trigger.get("description", "Brak opisu")
 
-            channels_str = ", ".join(f"<#{cid}>" for cid in channels) if channels else "Wszystkie"
-            roles_str = ", ".join(f"<@&{rid}>" for rid in roles) if roles else "Wszystkie"
+            # channels_str = ", ".join(f"<#{cid}>" for cid in channels) if channels else "Wszystkie"
+            # roles_str = ", ".join(f"<@&{rid}>" for rid in roles) if roles else "Wszystkie"
 
             embed.add_field(
-            name=f"Trigger: {keyword}",
+            name=f"**Trigger**: *{keyword}*",
             value=(
                 f"**Response:** {response}\n"
                 f"**Case sensitive:** {case_sensitive}\n"
                 f"**Whole word:** {whole_word}\n"
                 f"**Enabled:** {enabled}\n"
                 f"**Cooldown:** {cooldown_seconds}s\n"
-                f"**Channels:** {channels_str}\n"
-                f"**Roles:** {roles_str}\n"
+                # f"**Channels:** {channels_str}\n"
+                # f"**Roles:** {roles_str}\n"
                 f"**Description:** {description}"
             ),
             inline=False,
@@ -429,7 +429,7 @@ class Utilities(commands.Cog):
         cooldown_seconds="Czas odnowienia wyzwalacza (w sekundach)",
         description="Opis wyzwalacza"
     )
-    async def triggers_add(self, interaction: discord.Interaction, keyword: str, response: str, case_sensitive: bool = False, whole_word: bool = False, enabled: bool = True, cooldown_seconds: int = 0, description: str = ""):
+    async def triggers_add(self, interaction: discord.Interaction, keyword: str, response: str, case_sensitive: bool = False, whole_word: bool = True, enabled: bool = True, cooldown_seconds: int = 0, description: str = ""):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
