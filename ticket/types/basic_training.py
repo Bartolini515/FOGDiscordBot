@@ -13,9 +13,9 @@ class BasicTrainingTicketType:
         )
 
     def get_closed_message(self) -> str:
-        return "Ticket szkolenia podstawowego został zamknięty."
+        return "Ticket szkolenia SzWI został zamknięty."
     def get_reopened_message(self) -> str:
-        return "Ticket szkolenia podstawowego został ponownie otwarty."
+        return "Ticket szkolenia SzWI został ponownie otwarty."
     
     async def on_ticket_created(self, bot, interaction, channel, category, title):
         await self.set_permissions_for_ticket_managers(channel, interaction.guild, bot.permissions.get("basic_training_tickets_managers", []))
