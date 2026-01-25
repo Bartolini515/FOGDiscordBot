@@ -240,6 +240,7 @@ async def create_ticket_channel(
             send_messages=True,
             read_message_history=True,
             manage_channels=True,
+            manage_messages=True,
         )
 
     category = guild.get_channel(category_id) if category_id else None
@@ -266,3 +267,16 @@ async def set_ticket_user_send_permission(
     overwrite.view_channel = True
     await channel.set_permissions(member, overwrite=overwrite)
 
+
+async def set_permissions_for_ticket_managers(channel, guild, ticket_manager_ids):
+    if ticket_manager_ids:
+        for ticket_manager_role_id in ticket_manager_ids:
+            ticket_manager_role = guild.get_role(ticket_manager_role_id)
+            if ticket_manager_role:
+                await channel.set_permissions(
+                    ticket_manager_role,
+                    read_messages=True,
+                    send_messages=True,
+                    view_channel=True,
+                    manage_messages=True,
+                )

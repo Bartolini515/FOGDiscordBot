@@ -33,8 +33,15 @@ class TicketsCog(commands.Cog):
         await self._restore_ticket_create_messages()
         await self._restore_ticket_views()
 
-    def _is_ticket_admin(self, user: discord.Member) -> bool:
-        return user.guild_permissions.administrator
+    def _is_ticket_admin(self, user: discord.Member, channel: discord.TextChannel) -> bool:
+        if user.guild_permissions.administrator:
+            return True
+
+        if channel is None:
+            return False
+
+        perms = channel.permissions_for(user)
+        return perms.manage_messages
 
     async def _restore_ticket_create_messages(self):
         try:
@@ -163,6 +170,14 @@ class TicketsCog(commands.Cog):
                 title=title,
             )
         await channel.send(content=handler.get_open_message(interaction.user, title), view=view)
+        
+        if hasattr(handler, "get_ticket_managers_ids"):
+            ticket_manager_ids = await handler.get_ticket_managers_ids(self.bot)
+            await core.set_permissions_for_ticket_managers(
+                channel=channel,
+                guild=interaction.guild,
+                ticket_manager_ids=ticket_manager_ids,
+            )
 
         if hasattr(handler, "on_ticket_created"):
             await handler.on_ticket_created(
@@ -265,7 +280,7 @@ class TicketsCog(commands.Cog):
         logger.info(f"Ticket in channel {channel_id} reopened by {interaction.user} ({interaction.user.id})")
 
     async def _handle_ticket_transcript(self, interaction: discord.Interaction, channel_id: int):
-        if not interaction.user.guild_permissions.administrator:
+        if not self._is_ticket_admin(interaction.user, interaction.channel):
             await interaction.response.send_message("Nie masz uprawnień do generowania transcriptu.", ephemeral=True)
             return
 
@@ -299,7 +314,7 @@ class TicketsCog(commands.Cog):
         logger.info(f"Transcript generated for channel {channel_id} by {interaction.user} ({interaction.user.id})")
 
     async def _handle_ticket_delete(self, interaction: discord.Interaction, channel_id: int):
-        if not interaction.user.guild_permissions.administrator:
+        if not self._is_ticket_admin(interaction.user, interaction.channel):
             await interaction.response.send_message("Nie masz uprawnień do usuwania ticketów.", ephemeral=True)
             return
 
@@ -385,7 +400,7 @@ class TicketsCog(commands.Cog):
         if not hasattr(self.bot, "db") or self.bot.db is None:
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
-        if not self._is_ticket_admin(interaction.user):
+        if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("Nie masz uprawnień do tej komendy.", ephemeral=True)
             return
 
@@ -427,7 +442,7 @@ class TicketsCog(commands.Cog):
         if not hasattr(self.bot, "db") or self.bot.db is None:
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
-        if not self._is_ticket_admin(interaction.user):
+        if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("Nie masz uprawnień do tej komendy.", ephemeral=True)
             return
 

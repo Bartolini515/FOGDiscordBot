@@ -47,7 +47,8 @@ class TicketCreateButton(discord.ui.Button):
 
 class TicketCreateSelect(discord.ui.Select):
     def __init__(self, categories: list[str], custom_id: str):
-        options = [discord.SelectOption(label=cat, value=cat) for cat in categories]
+        options = [discord.SelectOption(label="Odznacz", value="__none__")]
+        options += [discord.SelectOption(label=cat, value=cat) for cat in categories]
         super().__init__(
             placeholder="Wybierz kategorię ticketu",
             min_values=1,
@@ -59,6 +60,10 @@ class TicketCreateSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         selected = self.values[0]
+        if selected == "__none__":
+            await interaction.response.defer()
+            return
+
         cog = interaction.client.get_cog("TicketsCog")
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)

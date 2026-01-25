@@ -85,33 +85,36 @@ class Triggers(commands.Cog):
             #             break
             #     if not has_role:
             #         continue
-                
-            cooldown_seconds = trigger.get("cooldown_seconds", 0)
-            if cooldown_seconds > 0: # Check cooldown
-                last_triggered_time = self.last_triggered_times.get(keyword, 0)
-                current_time = discord.utils.utcnow().timestamp()
-                if current_time - last_triggered_time < cooldown_seconds:
-                    if debug:
-                        logger.debug(f"Trigger '{keyword}' is on cooldown, skipping.")
-                    continue
-                self.last_triggered_times[keyword] = current_time
             
             content_to_check = message.content if trigger.get("case_sensitive", False) else message.content.lower() # Prepare content for checking based on case sensitivity
             if debug:
                 logger.debug(f"Content to check for trigger '{keyword}': {content_to_check}")
+            matched = False
             if trigger.get("whole_word", False): # Check the word based on whole word match setting
                 if debug:
                     logger.debug(f"Trigger '{keyword}' requires whole word match.")
                 words = content_to_check.split()
                 if keyword in words:
-                    response = trigger.get("response", "")
-                    if response != "":
-                        await message.channel.send(response)
+                    matched = True
             else:
                 if content_to_check.find(keyword) != -1:
-                    response = trigger.get("response", "")
-                    if response != "":
-                        await message.channel.send(response)
+                    matched = True
+                    
+            if matched:
+                cooldown_seconds = trigger.get("cooldown_seconds", 0)
+                if cooldown_seconds > 0: # Check cooldown
+                    last_triggered_time = self.last_triggered_times.get(keyword, 0)
+                    current_time = discord.utils.utcnow().timestamp()
+                    if current_time - last_triggered_time < cooldown_seconds:
+                        if debug:
+                            logger.debug(f"Trigger '{keyword}' is on cooldown, skipping.")
+                        continue
+                    self.last_triggered_times[keyword] = current_time
+                    
+                response = trigger.get("response", "")
+                if response != "":
+                    await message.channel.send(response)
+                
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(Triggers(bot))

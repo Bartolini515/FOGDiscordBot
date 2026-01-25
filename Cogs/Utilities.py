@@ -41,10 +41,33 @@ class Utilities(commands.Cog):
         uptime_str = str(uptime).split(".")[0]  # drop microseconds
         embed.add_field(name="Czas działania", value=uptime_str, inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    
+    
+    
+    # =========== Tools section ===========
+    # /clear
+    @app_commands.command(
+        name="clear",
+        description="Usuń określoną liczbę wiadomości z kanału",
+    )
+    @app_commands.describe(
+        liczba="Liczba wiadomości do usunięcia (maksymalnie 100)"
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def clear(self, interaction: discord.Interaction, liczba: int):
+        if liczba < 1 or liczba > 100:
+            await interaction.response.send_message("Liczba musi być pomiędzy 1 a 100.", ephemeral=True)
+            return
         
-        
-        
-        
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        deleted = await interaction.channel.purge(limit=liczba)
+        await interaction.followup.send(f"Usunięto {len(deleted)} wiadomości.", ephemeral=True)
+    
+    
     # =========== Permissions section ===========
     # /permissions_list
     @app_commands.command(
@@ -115,14 +138,14 @@ class Utilities(commands.Cog):
             return
 
         if uzytkownik:
-            user_id = str(uzytkownik.id)
+            user_id = uzytkownik.id
             if user_id in self.bot.permissions[kategoria]:
                 await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} już posiada uprawnienia w kategorii '{kategoria}'.", ephemeral=True)
                 return
             self.bot.permissions[kategoria].append(user_id)
 
         if rola:
-            role_id = str(rola.id)
+            role_id = rola.id
             if role_id in self.bot.permissions[kategoria]:
                 await interaction.response.send_message(f"Rola {rola.mention} już posiada uprawnienia w kategorii '{kategoria}'.", ephemeral=True)
                 return
@@ -158,14 +181,14 @@ class Utilities(commands.Cog):
             return
 
         if uzytkownik:
-            user_id = str(uzytkownik.id)
+            user_id = uzytkownik.id
             if user_id not in self.bot.permissions[kategoria]:
                 await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} nie posiada uprawnień w kategorii '{kategoria}'.", ephemeral=True)
                 return
             self.bot.permissions[kategoria].remove(user_id)
 
         if rola:
-            role_id = str(rola.id)
+            role_id = rola.id
             if role_id not in self.bot.permissions[kategoria]:
                 await interaction.response.send_message(f"Rola {rola.mention} nie posiada uprawnień w kategorii '{kategoria}'.", ephemeral=True)
                 return
@@ -304,7 +327,7 @@ class Utilities(commands.Cog):
         category="Kategoria Discord do przypisania ticketów",
         prompt_title="Czy wymagać tytułu ticketu"
     )
-    async def ticket_categories_add(self, interaction: discord.Interaction, name: str, description: str, category: discord.CategoryChannel, prompt_title: bool = True):
+    async def ticket_categories_add(self, interaction: discord.Interaction, name: str, description: str, category: discord.CategoryChannel, prompt_title: bool = False):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return

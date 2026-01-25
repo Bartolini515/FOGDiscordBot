@@ -15,19 +15,8 @@ class MissionTicketType:
     def get_reopened_message(self) -> str:
         return "Ticket misji został ponownie otwarty."
     
-    async def on_ticket_created(self, bot, interaction, channel, category, title):
-        await self.set_permissions_for_ticket_managers(channel, interaction.guild, bot.permissions.get("mission_tickets_managers", []))
-        return
+    def get_ticket_managers_ids(self, bot):
+        return bot.permissions.get("mission_tickets_managers", [])
     
-    # Set permissions for ticket managers
-    async def set_permissions_for_ticket_managers(self, channel, guild, ticket_manager_ids):
-        if ticket_manager_ids:
-            for ticket_manager_role_id in ticket_manager_ids:
-                ticket_manager_role = guild.get_role(ticket_manager_role_id)
-                if ticket_manager_role:
-                    await channel.set_permissions(
-                        ticket_manager_role,
-                        read_messages=True,
-                        send_messages=True,
-                        view_channel=True,
-                    )
+    async def on_ticket_created(self, bot, interaction, channel, category, title):
+        return

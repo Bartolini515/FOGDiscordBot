@@ -19,11 +19,11 @@ class ProposalTicketType:
         return "Ticket propozycji został ponownie otwarty."
     
     async def customize_open_view(self, view, bot, interaction, channel, category, title):
-        view.add_item(self.ProposalForwardButton(bot, channel.id, title))
-    
-    
-            
-    
+        view.add_item(ProposalForwardButton(bot, channel.id, title))
+
+
+
+
 class ProposalForwardButton(discord.ui.Button):
         def __init__(self, bot, channel_id, title):
             super().__init__(
@@ -37,6 +37,10 @@ class ProposalForwardButton(discord.ui.Button):
             self.proposal_channel_id = bot.channels.get("proposals_channel_id")
 
         async def callback(self, interaction: discord.Interaction):
+            if not interaction.user.guild_permissions.administrator or interaction.channel.permissions_for(interaction.user).manage_messages is False:
+                await interaction.response.send_message("Nie masz uprawnień do przekazywania propozycji.", ephemeral=True)
+                return
+
             await interaction.response.defer(ephemeral=True)
             embed = discord.Embed(
                 title="Nowa propozycja do głosowania",
@@ -65,7 +69,9 @@ class ProposalForwardButton(discord.ui.Button):
             if proposal_channel is None:
                 proposal_channel = await self.bot.fetch_channel(self.proposal_channel_id)
 
-            await proposal_channel.send(embed=embed)
+            message = await proposal_channel.send(embed=embed)
+            await message.add_reaction("👍")
+            await message.add_reaction("👎")
             
             await interaction.followup.send("Propozycja przekazana.", ephemeral=True)
 

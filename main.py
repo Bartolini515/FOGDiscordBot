@@ -150,6 +150,9 @@ class MyBot(commands.Bot):
             data["permissions"] = self.permissions
             data["technical_info"]["current_run_date"] = self.technical_info["current_run_date"]
             data["channels"] = self.channels
+            data["ticket_system"] = self.ticket_system
+            data["message_triggers"] = self.message_triggers
+            
         with open("configuration.json", "w", encoding="utf-8") as config:
             json.dump(data, config, indent=4)
         
