@@ -61,7 +61,7 @@ class Recruitment(commands.Cog):
             "- Aby móc brać udział w misjach należy abyś ukończył szkolenie podstawowe. Stwórz ticket na kanale #ticket-szwi.\n"
         )
         
-        await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} został zrekrutowany i otrzymał rolę Rekrut.", ephemeral=False)
+        await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} został zrekrutowany i otrzymał rolę Rekrut.", ephemeral=True)
         
         logger.info(
             f"User {interaction.user} ({interaction.user.id}) recruited {uzytkownik} ({uzytkownik.id})"
