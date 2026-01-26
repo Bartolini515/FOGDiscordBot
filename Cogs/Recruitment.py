@@ -51,6 +51,16 @@ class Recruitment(commands.Cog):
         
         await uzytkownik.add_roles(recruit_role)
         await uzytkownik.remove_roles(candidate_role)
+        
+        await uzytkownik.send(
+            "Gratulacje! Zostałeś zrekrutowany i otrzymałeś rolę Rekrut stając się pełnoprawnym członkiem grupy FOG!\n"
+            "Twój rekruter powinien cię zaznajomić z wszystkimi podstawowymi informacjami, jednak dla przypomnienia:\n"
+            "- Dodatkowe role możesz dobrać klikając kanały i role na samej górze listy kanałów.\n"
+            "- Używając komendy /help możesz zobaczyć listę dostępnych komend bota.\n"
+            "- Misje działają na zasadzie postów na kanale #misje-zaplanowane, gdzie zapisy są prowadzone w poście misji.\n"
+            "- Aby móc brać udział w misjach należy abyś ukończył szkolenie podstawowe. Stwórz ticket na kanale #ticket-szwi.\n"
+        )
+        
         await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} został zrekrutowany i otrzymał rolę Rekrut.", ephemeral=False)
         
         logger.info(
