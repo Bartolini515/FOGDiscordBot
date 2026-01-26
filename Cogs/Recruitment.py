@@ -49,8 +49,8 @@ class Recruitment(commands.Cog):
             await interaction.response.send_message("Rola kandydata lub rekruta nie jest skonfigurowana.", ephemeral=True)
             return
         
-        await uzytkownik.add_roles(recruit_role)
         await uzytkownik.remove_roles(candidate_role)
+        await uzytkownik.add_roles(recruit_role)
         
         await uzytkownik.send(
             "Gratulacje! Zostałeś zrekrutowany i otrzymałeś rolę Rekrut stając się pełnoprawnym członkiem grupy FOG!\n"

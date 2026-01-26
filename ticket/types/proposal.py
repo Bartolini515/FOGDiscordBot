@@ -42,11 +42,6 @@ class ProposalForwardButton(discord.ui.Button):
                 return
 
             await interaction.response.defer(ephemeral=True)
-            embed = discord.Embed(
-                title="Nowa propozycja do głosowania",
-                description=f"**Tytuł:** {self.title}\n**Użytkownik:** {interaction.user.mention}\n\n",
-                color=discord.Color.green(),
-            )
             
             channel = self.bot.get_channel(self.channel_id)
             description_text = None
@@ -55,10 +50,18 @@ class ProposalForwardButton(discord.ui.Button):
                 msgs = [m async for m in channel.history(limit=2, oldest_first=True)]
                 if len(msgs) >= 2:
                     description_text = msgs[1].content
+                    description_author = msgs[1].author
+                    
 
             if not description_text or not description_text.strip():
                 description_text = "Brak opisu."
-
+                
+            embed = discord.Embed(
+                title="Nowa propozycja do głosowania",
+                description=f"**Tytuł:** {self.title}\n**Użytkownik:** {description_author.mention}\n\n",
+                color=discord.Color.green(),
+            )
+            
             embed.add_field(
                 name="Opis",
                 value=description_text[:1024],
