@@ -82,6 +82,9 @@ class SlotSelect(discord.ui.Select):
             logger.info(
                 f"User {interaction.user} ({user_id}) is assigning to slot {selected_value} ({selected_label}) in squad {self.squad}"
             )
+            
+            if debug:
+                logger.debug(f"Selected value: {selected_value}, label: {selected_label}")
 
             # Find previous assignment (so we only rebuild the messages that actually change)
             prev_message_id: int | None = None
@@ -134,6 +137,7 @@ class SlotSelect(discord.ui.Select):
 
                     view = discord.ui.View(timeout=None)
                     view.add_item(SlotSelect(slots=slots_dict, custom_id=self.custom_id_, squad=self.squad, mission_id=self.mission_id))
+                    view.add_item(SignOutButton(custom_id=f"signout_button_{interaction.message.id}"))
                     await interaction.message.edit(content=_message_content(slots_dict=slots_dict, squad=self.squad), view=view)
                 except Exception as e:
                     self.logger.exception("Error while rebuilding current signup message (fallback)", exc_info=e)
@@ -148,6 +152,51 @@ class SlotSelect(discord.ui.Select):
                 await do_signup()
         else:
             await do_signup()
+
+
+class SignOutButton(discord.ui.Button):
+    def __init__(self, custom_id: str | None = None):
+        params = {
+            "label": "Wypisz się",
+            "style": discord.ButtonStyle.danger,
+        }
+        if custom_id is not None:
+            params["custom_id"] = custom_id
+        super().__init__(**params)
+
+        self.custom_id_ = custom_id  # custom_id_ written that way to avoid conflict with parent custom_id property
+
+    async def callback(self, interaction: discord.Interaction):
+        rows = await Missions.get_channel(interaction.client.db, interaction.channel.id)
+        if not rows: # Validation of mission existence
+            await interaction.response.send_message("Ta komenda może być użyta tylko w kanale misji.", ephemeral=True)
+            return
+        mission_id = rows[0] if rows else None
+        mission_name = rows[1] if rows else None
+        creator_user_id = rows[4] if rows else None
+        
+        rows = await Slots.get_by_mission_and_user(interaction.client.db, mission_id, interaction.user.id)
+        if not rows:
+            await interaction.response.send_message(f"Nie jesteś zapisany na misję {mission_name}.", ephemeral=True)
+            return
+        message_id = rows[1]
+        
+        # Remove the user from slot and rebuild the view
+        await Slots.remove_user_from_slot(interaction.client.db, mission_id, interaction.user.id)
+        try:
+            cog = interaction.client.get_cog("MissionsCog")
+            if cog is not None:
+                await cog._rebuild_signup_message(
+                    channel=interaction.channel, mission_id=mission_id, message_id=message_id
+                )
+            
+        except (discord.NotFound, discord.Forbidden):
+            pass
+        except Exception as e:
+            logger.exception("Error while rebuilding signup message after removing user", exc_info=e)
+
+        logger.info(f"User {interaction.user} ({interaction.user.id}) signed out from mission {mission_name} in channel {interaction.channel.id}")
+        await interaction.response.send_message(f"Wypisałeś się z misji {mission_name}.", ephemeral=True)
 
 
 
@@ -191,6 +240,7 @@ class MissionsCog(commands.Cog):
                 mission_id=mission_id,
             )
         )
+        view.add_item(SignOutButton(custom_id=f"signout_button_{message_id}"))
 
         await msg.edit(content=_message_content(slots_dict=slots_dict, squad=squad_name), view=view)
 
@@ -230,6 +280,7 @@ class MissionsCog(commands.Cog):
                         mission_id=mission_id,
                     )
                 )
+                view.add_item(SignOutButton(custom_id=f"signout_button_{message_id}"))
                 self.bot.add_view(view, message_id=message_id)
                 self._registered_persistent_views.add(int(message_id))
         except Exception as e:
@@ -472,7 +523,7 @@ class MissionsCog(commands.Cog):
         
         # Construct slots dict for SlotSelect
         max_id = await Slots.max_id(self.bot.db)
-        slots_dict = {i + 1: (i + 1, slot, None) for i, slot in enumerate(slots, start=max_id[0] + 1 if max_id[0] else 0)}
+        slots_dict = {i: (i, slot, None) for i, slot in enumerate(slots, start=max_id[0] + 1 if max_id[0] else 0)}
         
         view = discord.ui.View()
         select = SlotSelect(slots=slots_dict, squad=druzyna, mission_id=mission_id)
@@ -484,6 +535,7 @@ class MissionsCog(commands.Cog):
         # make the view persistent using the message id as part of the custom_id
         persistent_view = discord.ui.View(timeout=None)
         persistent_view.add_item(SlotSelect(slots_dict, custom_id=f"mission_select_{message.id}", squad=druzyna, mission_id=mission_id))
+        persistent_view.add_item(SignOutButton(custom_id=f"signout_button_{message.id}"))
         await message.edit(view=persistent_view)
 
         # Register persistent view once for this message
