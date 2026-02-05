@@ -50,6 +50,9 @@ class SlotSelect(discord.ui.Select):
             "placeholder": "Wybierz slot",
             "options": options,
         }
+        if not options:
+            params["options"] = [discord.SelectOption(label="Brak wolnych slotów", value="no_slots")]
+            params["disabled"] = True
         if custom_id is not None:
             params["custom_id"] = custom_id
         super().__init__(**params)
