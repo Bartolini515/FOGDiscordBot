@@ -73,17 +73,18 @@ class Utilities(commands.Cog):
         description="Zmień ilość misji użytkownika",
     )
     @app_commands.describe(
+        user="Użytkownik którego misje chcesz zmienić",
         liczba="Nowa ilość misji użytkownika"
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
-    async def change_user_missions(self, interaction: discord.Interaction, liczba: int):
+    async def change_user_missions(self, interaction: discord.Interaction, user: discord.Member, liczba: int):
         if liczba < 0:
             await interaction.response.send_message("Liczba misji nie może być ujemna.", ephemeral=True)
             return
         
-        await Attendance.update_all_time_missions(self.bot.db, interaction.user.id, liczba)
+        await Attendance.update_all_time_missions(self.bot.db, user.id, liczba)
         await interaction.response.send_message(f"Ilość misji użytkownika została zmieniona na {liczba}.", ephemeral=True)
     
     
