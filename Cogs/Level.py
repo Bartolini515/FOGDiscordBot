@@ -142,7 +142,7 @@ class Level(commands.Cog):
             embed.add_field(name="Do następnego poziomu", value="Osiągnięto maksymalny poziom!", inline=False)
         embed.add_field(name="Poziom w rankingu", value=f"#{rank}", inline=False)
 
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         
     # /leaderboard
     @app_commands.command(
@@ -163,7 +163,7 @@ class Level(commands.Cog):
                 value=f"Poziom: {level}, Doświadczenie: {experience} XP",
                 inline=False
             )
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(Level(bot))
