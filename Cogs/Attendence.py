@@ -14,7 +14,6 @@ class AttendanceCog(commands.Cog):
         self.bot = bot
 
     
-    # TODO: Test this
     # /misja_obecnosc
     @app_commands.command(
         name="misja_obecnosc",
@@ -99,7 +98,7 @@ class AttendanceCog(commands.Cog):
         await interaction.response.send_message("Obecność została zapisana.", ephemeral=True)
         logger.info(f"Attendance for mission {mission_name} ({mission_date}) recorded by {interaction.user.name}.")
         
-    #TODO: Test this
+        
     #/obecnosc_sprawdz
     @app_commands.command(
         name="obecnosc_sprawdz",
@@ -129,9 +128,9 @@ class AttendanceCog(commands.Cog):
         embed.add_field(name="Ostatnia misja", value=last_mission_date if last_mission_date else "Brak danych", inline=False)
         embed.add_field(name="Łączna liczba misji", value=str(all_time_missions), inline=False)
 
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
     
-    # TODO: Test this
+
     #/obecnosc_ranking
     @app_commands.command(
         name="obecnosc_ranking",
@@ -157,7 +156,7 @@ class AttendanceCog(commands.Cog):
             username = user.name if user else f"Użytkownik {user_id}"
             description_lines.append(f"**#{rank}** - {username}: {all_time_missions} misji (ostatnia: {last_mission_date if last_mission_date else 'Brak danych'})")
         embed.description = "\n".join(description_lines)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(AttendanceCog(bot))
