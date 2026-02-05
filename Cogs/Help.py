@@ -59,6 +59,8 @@ class Help(commands.Cog):
             cmds = sorted(grouped[category], key=lambda c: c.qualified_name.lower())
             lines = [f"`/{c.qualified_name}` — {c.description or '—'}" for c in cmds]
             embed.add_field(name=category, value="\n".join(lines), inline=False)
+        
+        embed.description = "Aby uzyskać więcej informacji skorzystaj z dokumentacji klikając [tutaj](https://docs.google.com/document/d/1WYjFjQWeEHbatsnRmbGqsi6jPRKrT3yajF-v5BlGVEw/edit?usp=sharing)"
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
