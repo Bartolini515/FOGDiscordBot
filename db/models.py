@@ -356,6 +356,21 @@ class Attendance:
             (limit,)
         )
         return await cursor.fetchall()
+    
+    @staticmethod
+    async def update_all_time_missions(db, user_id: int, missions: int):
+        """Updates the all-time missions count for a user
+
+        Args:
+            db (_type_): Database to be used
+            user_id (int): Discord user id
+            missions (int): New all-time missions count
+        """
+        await db.conn.execute(
+            "UPDATE attendance SET all_time_missions = ? WHERE user_id = ?",
+            (missions, user_id)
+        )
+        await db.conn.commit()
 
 
 

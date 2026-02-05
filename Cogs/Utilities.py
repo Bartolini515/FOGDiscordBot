@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
-from db.models import TicketTypes
+from db.models import Attendance
 
 
 class Utilities(commands.Cog):
@@ -66,6 +66,27 @@ class Utilities(commands.Cog):
 
         deleted = await interaction.channel.purge(limit=liczba)
         await interaction.followup.send(f"Usunięto {len(deleted)} wiadomości.", ephemeral=True)
+        
+    #/change_user_missions
+    @app_commands.command(
+        name="change_user_missions",
+        description="Zmień ilość misji użytkownika",
+    )
+    @app_commands.describe(
+        liczba="Nowa ilość misji użytkownika"
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def change_user_missions(self, interaction: discord.Interaction, liczba: int):
+        if liczba < 0:
+            await interaction.response.send_message("Liczba misji nie może być ujemna.", ephemeral=True)
+            return
+        
+        await Attendance.update_all_time_missions(self.bot.db, interaction.user.id, liczba)
+        await interaction.response.send_message(f"Ilość misji użytkownika została zmieniona na {liczba}.", ephemeral=True)
+    
+    
     
     
     # =========== Permissions section ===========
