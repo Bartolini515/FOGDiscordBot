@@ -370,6 +370,14 @@ class Attendance:
             "UPDATE attendance SET all_time_missions = ? WHERE user_id = ?",
             (missions, user_id)
         )
+        cursor = await db.conn.execute("SELECT changes()")
+        updated_rows = await cursor.fetchone()
+        if not updated_rows or updated_rows[0] == 0:
+            await db.conn.execute(
+            "INSERT INTO attendance (user_id, last_mission_date, all_time_missions) VALUES (?, NULL, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET all_time_missions = excluded.all_time_missions",
+            (user_id, missions)
+            )
         await db.conn.commit()
 
 
