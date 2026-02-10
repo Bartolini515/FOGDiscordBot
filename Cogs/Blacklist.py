@@ -76,7 +76,7 @@ class BlacklistCog(commands.Cog):
             username = f"{username} ({user_id})"
             expires_str = expires_at if expires_at else "Nigdy"
             embed.add_field(name=username, value=f"Powód: {reason}\nDodany: {str(added_at).split( )[0]}\nWygasa: {expires_str}", inline=False)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(BlacklistCog(bot))
