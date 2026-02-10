@@ -4,6 +4,7 @@ import json
 import logging
 import html
 import discord
+import inspect
 from discord.ext import commands
 from discord import app_commands
 
@@ -172,7 +173,9 @@ class TicketsCog(commands.Cog):
         await channel.send(content=handler.get_open_message(interaction.user, title), view=view)
         
         if hasattr(handler, "get_ticket_managers_ids"):
-            ticket_manager_ids = await handler.get_ticket_managers_ids(self.bot)
+            ticket_manager_ids = handler.get_ticket_managers_ids(self.bot)
+            if inspect.isawaitable(ticket_manager_ids):
+                ticket_manager_ids = await ticket_manager_ids
             await core.set_permissions_for_ticket_managers(
                 channel=channel,
                 guild=interaction.guild,
