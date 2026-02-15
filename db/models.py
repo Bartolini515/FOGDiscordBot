@@ -440,6 +440,21 @@ class Ranks:
             (current_required_missions,)
         )
         return await cursor.fetchone()
+    
+    @staticmethod
+    async def list(db):
+        """Lists all ranks
+
+        Args:
+            db (_type_): Database to be used
+
+        Returns:
+            fetchall: id, name, role_id, required_missions
+        """
+        cursor = await db.conn.execute(
+            "SELECT id, name, role_id, required_missions FROM ranks ORDER BY required_missions ASC",
+        )
+        return await cursor.fetchall()
 
 
 

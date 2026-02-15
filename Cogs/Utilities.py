@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
-from db.models import Attendance
+from db.models import Attendance, Users, Ranks
 
 
 class Utilities(commands.Cog):
@@ -83,6 +83,11 @@ class Utilities(commands.Cog):
         if liczba < 0:
             await interaction.response.send_message("Liczba misji nie może być ujemna.", ephemeral=True)
             return
+        
+        for id, _, _, required_missions in await Ranks.list(self.bot.db):
+            if required_missions > liczba:
+                await Users.update_rank(self.bot.db, user.id, id)
+                break
         
         await Attendance.update_all_time_missions(self.bot.db, user.id, liczba)
         await interaction.response.send_message(f"Ilość misji użytkownika została zmieniona na {liczba}.", ephemeral=True)
