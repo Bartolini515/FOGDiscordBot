@@ -157,9 +157,9 @@ class TrainingsCog(commands.Cog):
         # Permission check: allow if user is explicitly allowed OR has an allowed role OR is admin
         allowed = self.bot.permissions.get("trainers", [])
 
-        is_allowed_user = str(interaction.user.id) in allowed
+        is_allowed_user = interaction.user.id in allowed
         is_allowed_role = any(
-            (str(r.id) in allowed)
+            (r.id in allowed)
             for r in interaction.user.roles
         )
 
