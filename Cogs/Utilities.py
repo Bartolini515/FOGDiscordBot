@@ -3,6 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
 from db.models import Attendance, Users, Ranks
+import logging
+
+logger = logging.getLogger("fogbot")
 
 
 class Utilities(commands.Cog):
@@ -91,6 +94,37 @@ class Utilities(commands.Cog):
         
         await Attendance.update_all_time_missions(self.bot.db, user.id, liczba)
         await interaction.response.send_message(f"Ilość misji użytkownika została zmieniona na {liczba}.", ephemeral=True)
+        
+    #/assign_categories_roles
+    @app_commands.command(
+        name="assign_categories_roles",
+        description="Przypisz role kategorii wszystkim użytkownikom na serwerze",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def assign_categories_roles(self, interaction: discord.Interaction):
+        categories_roles_ids = self.bot.roles.get("categories_roles_ids", [])
+        if not categories_roles_ids:
+            await interaction.response.send_message("Nie zdefiniowano ról kategorii.", ephemeral=True)
+            return
+        
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Nie można znaleźć serwera.", ephemeral=True)
+            return
+        
+        members = [member for member in guild.members if not member.bot]
+        for member in members:
+            for role_id in categories_roles_ids:
+                role = guild.get_role(role_id)
+                if role and role not in member.roles:
+                    try:
+                        await member.add_roles(role)
+                    except Exception as e:
+                        logger.error(f"Nie udało się przypisać rolę {role.name} użytkownikowi {member.name}: {e}")
+        
+        await interaction.response.send_message("Role kategorii zostały przypisane wszystkim użytkownikom.", ephemeral=True)
     
     
     

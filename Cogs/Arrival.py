@@ -104,6 +104,17 @@ class Arrival(commands.Cog):
         # Add user in database
         await Users.add_user(self.bot.db, member.id, member.name)
         
+        # Assign categories roles
+        categories_roles_ids = self.bot.roles.get("categories_roles_ids", [])
+        if categories_roles_ids:
+            for role_id in categories_roles_ids:
+                role = member.guild.get_role(role_id)
+                if role:
+                    try:
+                        await member.add_roles(role)
+                    except Exception as e:
+                        logger.error(f"Nie udało się przypisać roli {role.name} ({role.id}) do {member} ({member.id}): {e}")
+        
         # Log to channel
         if self.log_channel_id:
             log_channel = member.guild.get_channel(self.log_channel_id)
