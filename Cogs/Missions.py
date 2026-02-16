@@ -366,9 +366,9 @@ class MissionsCog(commands.Cog):
         if debug:
             logger.debug(f"Allowed mission makers: {allowed}")
 
-        is_allowed_user = str(interaction.user.id) in allowed
+        is_allowed_user = interaction.user.id in allowed
         is_allowed_role = any(
-            (str(r.id) in allowed)
+            (r.id in allowed)
             for r in interaction.user.roles
         )
         
