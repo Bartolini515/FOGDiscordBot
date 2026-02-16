@@ -338,6 +338,7 @@ class MissionsCog(commands.Cog):
 
     async def cog_load(self):
         await self._restore_missions_views()
+        await self._restore_missions_reminders()
 
 
 
