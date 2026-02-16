@@ -452,7 +452,7 @@ class Ranks:
             fetchall: id, name, role_id, required_missions
         """
         cursor = await db.conn.execute(
-            "SELECT id, name, role_id, required_missions FROM ranks ORDER BY required_missions ASC",
+            "SELECT id, name, role_id, required_missions FROM ranks ORDER BY required_missions DESC",
         )
         return await cursor.fetchall()
 
