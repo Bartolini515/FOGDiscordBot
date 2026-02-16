@@ -104,14 +104,16 @@ class Utilities(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
     async def assign_categories_roles(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        
         categories_roles_ids = self.bot.roles.get("categories_roles_ids", [])
         if not categories_roles_ids:
-            await interaction.response.send_message("Nie zdefiniowano ról kategorii.", ephemeral=True)
+            await interaction.followup.send("Nie zdefiniowano ról kategorii.", ephemeral=True)
             return
         
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Nie można znaleźć serwera.", ephemeral=True)
+            await interaction.followup.send("Nie można znaleźć serwera.", ephemeral=True)
             return
         
         members = [member for member in guild.members if not member.bot]
@@ -124,7 +126,7 @@ class Utilities(commands.Cog):
                     except Exception as e:
                         logger.error(f"Nie udało się przypisać rolę {role.name} użytkownikowi {member.name}: {e}")
         
-        await interaction.response.send_message("Role kategorii zostały przypisane wszystkim użytkownikom.", ephemeral=True)
+        await interaction.followup.send("Role kategorii zostały przypisane wszystkim użytkownikom.", ephemeral=True)
     
     
     
