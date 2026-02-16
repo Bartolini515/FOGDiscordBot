@@ -88,7 +88,7 @@ class Utilities(commands.Cog):
             return
         
         for id, _, _, required_missions in await Ranks.list(self.bot.db):
-            if required_missions > liczba:
+            if liczba >= required_missions:
                 await Users.update_rank(self.bot.db, user.id, id)
                 break
         
