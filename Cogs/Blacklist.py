@@ -72,7 +72,7 @@ class BlacklistCog(commands.Cog):
             color=discord.Color.red()
         )
         for entry in blacklist_entries:
-            user_id, reason, added_at, expires_at, username = entry
+            user_id, reason, expires_at, added_at, username = entry
             username = f"{username} ({user_id})"
             expires_str = expires_at if expires_at else "Nigdy"
             embed.add_field(name=username, value=f"Powód: {reason}\nDodany: {str(added_at).split( )[0]}\nWygasa: {expires_str}", inline=False)
