@@ -127,7 +127,27 @@ class Utilities(commands.Cog):
                         logger.error(f"Nie udało się przypisać rolę {role.name} użytkownikowi {member.name}: {e}")
         
         await interaction.followup.send("Role kategorii zostały przypisane wszystkim użytkownikom.", ephemeral=True)
-    
+        
+    #/send_message
+    @app_commands.command(
+        name="send_message",
+        description="Wyślij wiadomość na określony kanał",
+    )
+    @app_commands.describe(
+        kanal="Kanał do którego chcesz wysłać wiadomość",
+        tresc="Treść wiadomości do wysłania"
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def send_message(self, interaction: discord.Interaction, kanal: discord.TextChannel, tresc: str):
+        try:
+            await kanal.send(tresc)
+            await interaction.response.send_message(f"Wiadomość została wysłana na {kanal.mention}.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Nie udało się wysłać wiadomości na {kanal.name}: {e}")
+            await interaction.response.send_message(f"Nie udało się wysłać wiadomości na {kanal.mention}.", ephemeral=True)
+
     
     
     
