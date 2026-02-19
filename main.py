@@ -22,7 +22,8 @@ if not os.path.exists("configuration.json"):
             "channels": {},
             "roles": {},
             "ticket_system": {},
-            "message_triggers": []
+            "message_triggers": [],
+            "messages": {}
             }, config, indent=4)
         print("Created default configuration.json, please edit it and restart the bot.")
         exit()
@@ -46,6 +47,7 @@ with open("configuration.json", "r", encoding="utf-8") as config:
     roles = data.get("roles", {})
     ticket_system = data.get("ticket_system", {})
     message_triggers = data.get("message_triggers", [])
+    messages = data.get("messages", {})
 
 # Load .env variables
 load_dotenv()
@@ -98,6 +100,7 @@ class MyBot(commands.Bot):
         self.roles = roles
         self.ticket_system = ticket_system
         self.message_triggers = message_triggers
+        self.messages = messages
         
     
     # Load cogs
@@ -152,6 +155,7 @@ class MyBot(commands.Bot):
             data["channels"] = self.channels
             data["ticket_system"] = self.ticket_system
             data["message_triggers"] = self.message_triggers
+            data["messages"] = self.messages
             
         with open("configuration.json", "w", encoding="utf-8") as config:
             json.dump(data, config, indent=4)

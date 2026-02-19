@@ -2,6 +2,9 @@ class MissionTicketType:
     type_name = "mission"
 
     def get_open_message(self, user, title: str) -> str:
+        message = self.bot.ticket_system.get("ticket_messages", {}).get("mission", "")
+        if message:
+            return message.format(mention=user.mention, name=user.name, id=user.id, guild=user.guild.name, display_name=user.display_name, title=title)
         return (
             f"📌 **Ticket misji**\n"
             f"Użytkownik: {user.mention}\n"

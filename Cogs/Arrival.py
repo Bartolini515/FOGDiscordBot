@@ -90,13 +90,8 @@ class Arrival(commands.Cog):
         try:
             # TODO: Update welcome message content
             dm_channel = await member.create_dm()
-            welcome_message = (
-                f"Witaj na serwerze FOG, {member.mention}!\n\n"
-                "Cieszymy się, że do nas dołączyłeś. Przeczytaj poniższe instrukcje które pomogą Ci zacząć.\n\n"
-                "- Zapoznaj się z regulaminem grupy który to znajdziesz pod tym linkiem: https://docs.google.com/document/d/1a8v9An-_wGI2StIZwWovKk0gOyM-wjEv2JaGPy8VobE/edit?usp=sharing\n"
-                "- Jeżeli chcesz zostać pełnoprawnym członkiem grupy, sprawdź kanał #informacje gdzie dowiesz się wszystkich potrzebnych informacji na ten temat.\n"
-                "- Jeżeli jesteś z innej grupy i masz propozycję współpracy, skontaktuj się z imperatorem lub innymi członkami sztabu.\n"
-            )
+            welcome_message = self.bot.messages.get("welcome_message", "Witaj na serwerze FOG, {mention}!")
+            welcome_message = welcome_message.format(mention=member.mention, name=member.name, id=member.id, guild=member.guild.name, display_name=member.display_name)
             await dm_channel.send(welcome_message)
         except Exception as e:
             logger.error(f"Nie udało się wysłać wiadomości powitalnej do {member} ({member.id}): {e}")
