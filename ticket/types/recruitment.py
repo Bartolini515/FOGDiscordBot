@@ -1,8 +1,8 @@
 class RecruitmentTicketType:
     type_name = "recruitment"
 
-    def get_open_message(self, user, title: str) -> str:
-        message = self.bot.ticket_system.get("ticket_messages", {}).get("recruitment", "")
+    def get_open_message(self, user, title: str, bot) -> str:
+        message = bot.ticket_system.get("ticket_messages", {}).get("recruitment", "")
         if message:
             return message.format(mention=user.mention, name=user.name, id=user.id, guild=user.guild.name, display_name=user.display_name, title=title)
         return (
@@ -13,7 +13,7 @@ class RecruitmentTicketType:
             "**Imię**:\n"
             "**Wiek**:\n"
             "**Ilość godzin w Arma 3 i/lub Arma Reforger:**\n"
-            "**Doświadczenie z innych grup (z jakich?):**"
+            "**Doświadczenie z innych grup (z jakich?):**\n"
             "**Skąd dowiedziałeś się o naszej grupie?:**"
         )
 

@@ -170,7 +170,7 @@ class TicketsCog(commands.Cog):
                 category=category,
                 title=title,
             )
-        await channel.send(content=handler.get_open_message(interaction.user, title), view=view)
+        await channel.send(content=handler.get_open_message(interaction.user, title, self.bot), view=view)
         
         if hasattr(handler, "get_ticket_managers_ids"):
             ticket_manager_ids = handler.get_ticket_managers_ids(self.bot)
