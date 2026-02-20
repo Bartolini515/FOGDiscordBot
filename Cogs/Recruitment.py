@@ -33,10 +33,9 @@ class Recruitment(commands.Cog):
         # Permission check: allow if user is explicitly allowed OR has an allowed role OR is admin
         allowed = self.bot.permissions.get("recruiters", [])
 
-        is_allowed_user = str(interaction.user.id) in allowed
+        is_allowed_user = interaction.user.id in allowed
         is_allowed_role = any(
-            (str(r.id) in allowed)
-            for r in interaction.user.roles
+            role.id in allowed for role in interaction.user.roles
         )
 
         if not (is_allowed_user or is_allowed_role or interaction.user.guild_permissions.administrator):
