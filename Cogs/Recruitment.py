@@ -93,7 +93,7 @@ class Recruitment(commands.Cog):
         
         await uzytkownik.send(recruitment_message)
         
-        await interaction.response.send_message(f"Wiadomość została wysłana do użytkownika {uzytkownik.mention}.", ephemeral=True)
+        await interaction.response.send_message(f"Użytkownikowi {uzytkownik.mention} nadano rolę SzWI.", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Recruitment(bot))
