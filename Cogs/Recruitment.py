@@ -61,7 +61,39 @@ class Recruitment(commands.Cog):
         logger.info(
             f"User {interaction.user} ({interaction.user.id}) recruited {uzytkownik} ({uzytkownik.id})"
         )
+        
+    # /szwi
+    @app_commands.command(
+        name="szwi",
+        description="Nadaje użytkownikowi SzWI.",
+        extras={"category": "Rekrutacja"},
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(
+        uzytkownik="Użytkownik, któremu chcesz nadawać SzWI."
+    )
+    async def szwi(self, interaction: discord.Interaction, uzytkownik: discord.Member):
+        # Permission check: allow if user is explicitly allowed OR has an allowed role OR is admin
+        allowed = self.bot.permissions.get("basic_training_tickets_managers", []) + self.bot.permissions.get("recruiters", [])
 
+        is_allowed_user = interaction.user.id in allowed
+        is_allowed_role = any(
+            role.id in allowed for role in interaction.user.roles
+        )
+
+        if not (is_allowed_user or is_allowed_role or interaction.user.guild_permissions.administrator):
+            await interaction.response.send_message("Nie masz uprawnień do wysyłania wiadomości do użytkowników.", ephemeral=True)
+            return
+        
+        szwi_role = interaction.guild.get_role(self.bot.roles.get("szwi_role_id"))
+        await uzytkownik.add_roles(szwi_role)
+        
+        recruitment_message = self.bot.messages.get("szwi_message", "Gratulacje! Przeszedłeś szkolenie podstawowe i jesteś gotowy do udziału w misjach grupy FOG!\n")
+        recruitment_message = recruitment_message.format(mention=uzytkownik.mention, name=uzytkownik.name, id=uzytkownik.id, guild=uzytkownik.guild.name, display_name=uzytkownik.display_name)
+        
+        await uzytkownik.send(recruitment_message)
+        
+        await interaction.response.send_message(f"Wiadomość została wysłana do użytkownika {uzytkownik.mention}.", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Recruitment(bot))
