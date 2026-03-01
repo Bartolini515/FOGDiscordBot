@@ -27,10 +27,10 @@ class BlacklistCog(commands.Cog):
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
         czas_trwania_date = datetime.now() + timedelta(days=czas_trwania) if czas_trwania else None
-        await Blacklist.add_to_blacklist(self.bot.db, uzytkownik.id, powod, czas_trwania_date.strftime("%Y-%m-%d %H:%M:%S") if czas_trwania_date else None)
+        await Blacklist.add_to_blacklist(self.bot.db, uzytkownik.id, powod, czas_trwania_date.strftime("%Y-%m-%d %H:%M") if czas_trwania_date else None)
         await interaction.response.send_message(f"Użytkownik {uzytkownik.name} został dodany do blacklisty.", ephemeral=True)
         try:
-            await uzytkownik.send(f"Zostałeś dodany do blacklisty FOG.\nPowód: {powod}.\nKoniec blokady: {czas_trwania_date.strftime('%Y-%m-%d %H:%M:%S') if czas_trwania_date else 'Nieskończony'}.")
+            await uzytkownik.send(f"Zostałeś dodany do blacklisty FOG.\nPowód: {powod}.\nKoniec blokady: {czas_trwania_date.strftime('%Y-%m-%d %H:%M') if czas_trwania_date else 'Nieskończony'}.")
             await uzytkownik.kick(reason=f"Użytkownik został dodany do blacklisty. Powód: {powod}.")
         except Exception as e:
             logger.warning(f"Could not send blacklist notification and kick {uzytkownik.name}: {e}")

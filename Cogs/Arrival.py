@@ -120,7 +120,7 @@ class Arrival(commands.Cog):
                     color=discord.Color.green()
                 )
                 embed.set_thumbnail(url=member.display_avatar.url)
-                embed.add_field(name="Dołączył", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+                embed.add_field(name="Dołączył", value=member.joined_at.strftime("%Y-%m-%d %H:%M"), inline=False)
                 embed.add_field(name="Zaproszony przez", value=used_invite.inviter.mention if used_invite and used_invite.inviter else "Nieznany", inline=False)
                 embed.add_field(name="Całkowita liczba członków", value=str(member.guild.member_count), inline=False)
                 await log_channel.send(embed=embed)

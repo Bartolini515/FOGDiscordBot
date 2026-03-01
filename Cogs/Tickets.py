@@ -348,7 +348,7 @@ class TicketsCog(commands.Cog):
 
         async for message in channel.history(limit=None, oldest_first=True):
             author = html.escape(message.author.display_name)
-            created = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            created = message.created_at.strftime("%Y-%m-%d %H:%M")
             content = html.escape(message.content) if message.content else ""
             attachments = ""
             if message.attachments:
