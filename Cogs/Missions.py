@@ -734,6 +734,41 @@ class MissionsCog(commands.Cog):
 
         logger.info(f"User {interaction.user} ({interaction.user.id}) removed user {uzytkownik} ({uzytkownik.id}) from mission {mission_name} in channel {interaction.channel.id}")
         await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} został wypisany z misji {mission_name}.", ephemeral=True)
+        
+    # # /misja_zapisy_wpisz
+    # @app_commands.command(
+    #     name="misja_zapisy_wpisz",
+    #     description="Wpisuje użytkownika do misji.",
+    #     extras={"category": "Misje"},
+    # )
+    # @app_commands.guild_only()
+    # @app_commands.describe(
+    #     uzytkownik="Użytkownik do wpisania",
+        
+    # )
+    # async def misja_zapisy_wpisz(self, interaction: discord.Interaction, uzytkownik: discord.Member, druzyna: str, slot: str):
+    #     if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+    #         return
+        
+    #     rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
+    #     if not rows: # Validation of mission existence
+    #         await interaction.response.send_message("Ta komenda może być użyta tylko w kanale misji.", ephemeral=True)
+    #         return
+    #     mission_id = rows[0]
+    #     creator_user_id = rows[4]
+        
+    #     if creator_user_id != interaction.user.id and not interaction.user.guild_permissions.administrator: # Validation of permissions
+    #         await interaction.response.send_message("Tylko twórca misji może wpisywać użytkowników do zapisów.", ephemeral=True)
+    #         return
+        
+    #     # Get the message_id for the specified team
+    #     rows = await Squads.get_by_name(self.bot.db, mission_id, druzyna)
+    #     if not rows:
+    #         await interaction.response.send_message(f"Nie znaleziono drużyny o podanej nazwie {druzyna}.", ephemeral=True)
+    #         return
+    #     message_id = rows[0]
+        
+        
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(MissionsCog(bot))
