@@ -440,7 +440,7 @@ class TicketsCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(kategorie="Lista kategorii oddzielona przecinkami")
+    @app_commands.describe(kategorie="Lista kategorii oddzielona średnikami (np. Kategoria1;Kategoria2)")
     async def ticket_wiadomosc_select(self, interaction: discord.Interaction, kategorie: str):
         if not hasattr(self.bot, "db") or self.bot.db is None:
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
@@ -449,7 +449,7 @@ class TicketsCog(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień do tej komendy.", ephemeral=True)
             return
 
-        raw = [c.strip() for c in kategorie.split(",") if c.strip()]
+        raw = [c.strip() for c in kategorie.split(";") if c.strip()]
         if not raw:
             await interaction.response.send_message("Podaj przynajmniej jedną kategorię.", ephemeral=True)
             return
