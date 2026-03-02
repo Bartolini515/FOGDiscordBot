@@ -19,6 +19,7 @@ class Level(commands.Cog):
         self.bot = bot
         self.users_experience_cache = {}
         self.cooldown_cache = {}
+        self._notifications_off_users_cache = {user: 1 for user in self.bot.leveling_system.get("notifications_off_users", [])}
         
     _calculate_experience = staticmethod(lambda level: int(5 * (level ** 2) + (50 * level) + 100))
     _calculate_level = staticmethod(lambda experience: int((-50 + (20 * experience + 500)** 0.5) / 10))
@@ -41,8 +42,8 @@ class Level(commands.Cog):
         
         try:
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-            if user is not None:
-                await user.send(f"Gratulacje, awansowałeś na poziom **{level}**! 🎉")
+            if user is not None and user_id not in self._notifications_off_users_cache:
+                await user.send(f"Gratulacje, awansowałeś na poziom **{level}**! 🎉\nJeżeli chcesz wyłączyć powiadomienia o awansach, użyj komendy '/level_notifications'")
         except (discord.Forbidden, discord.HTTPException, discord.NotFound) as e:
             logger.warning(f"Could not DM user {user_id} about level up: {e}")
 
@@ -116,6 +117,8 @@ class Level(commands.Cog):
         description="Sprawdź swój poziom i doświadczenie.",
         extras={"category": "Poziomy"}
     )
+    @app_commands.guild_only()
+    @app_commands.describe(uzytkownik="Użytkownik, którego poziom chcesz sprawdzić (domyślnie ty).")
     async def level(self, interaction: discord.Interaction, uzytkownik: discord.User = None):
         user_id = uzytkownik.id if uzytkownik else interaction.user.id
         current_exp = await self._get_cached_experience(user_id)
@@ -150,6 +153,7 @@ class Level(commands.Cog):
         description="Pokaż ranking poziomów użytkowników.",
         extras={"category": "Poziomy"}
     )
+    @app_commands.guild_only()
     @app_commands.describe(limit="Liczba użytkowników do wyświetlenia w rankingu (domyślnie 10).")
     async def leaderboard(self, interaction: discord.Interaction, limit: int = 10):
         leaderboard = await Users.get_leaderboard(self.bot.db, limit)
@@ -164,6 +168,22 @@ class Level(commands.Cog):
                 inline=False
             )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    # /level_notifications
+    @app_commands.command(
+        name="level_notifications",
+        description="Włącz lub wyłącz powiadomienia o awansach poziomów.",
+        extras={"category": "Poziomy"}
+    )
+    @app_commands.guild_only()
+    async def level_notifications(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+        if user_id in self._notifications_off_users_cache:
+            del self._notifications_off_users_cache[user_id]
+            await interaction.response.send_message("Powiadomienia o awansach poziomów zostały włączone.", ephemeral=True)
+        else:
+            self._notifications_off_users_cache[user_id] = 1
+            await interaction.response.send_message("Powiadomienia o awansach poziomów zostały wyłączone.", ephemeral=True)
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(Level(bot))
