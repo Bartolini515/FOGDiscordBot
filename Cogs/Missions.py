@@ -177,12 +177,17 @@ class SignOutButton(discord.ui.Button):
         mission_id = rows[0] if rows else None
         mission_name = rows[1] if rows else None
         creator_user_id = rows[4] if rows else None
+        date = rows[5] if rows else None
         
         rows = await Slots.get_by_mission_and_user(interaction.client.db, mission_id, interaction.user.id)
         if not rows:
             await interaction.response.send_message(f"Nie jesteś zapisany na misję {mission_name}.", ephemeral=True)
             return
         message_id = rows[1]
+        
+        if datetime.datetime.strptime(date, "%Y-%m-%d %H:%M") < datetime.datetime.now() + datetime.timedelta(hours=12):
+            await interaction.response.send_message("Tylko twórca misji, bądź sztab, może cię wypisać na mniej niż 12 godzin przed jej rozpoczęciem.", ephemeral=True)
+            return
         
         # Remove the user from slot and rebuild the view
         await Slots.remove_user_from_slot(interaction.client.db, mission_id, interaction.user.id)
@@ -192,7 +197,6 @@ class SignOutButton(discord.ui.Button):
                 await cog._rebuild_signup_message(
                     channel=interaction.channel, mission_id=mission_id, message_id=message_id
                 )
-            
         except (discord.NotFound, discord.Forbidden):
             pass
         except Exception as e:
@@ -682,11 +686,9 @@ class MissionsCog(commands.Cog):
     )
     @app_commands.guild_only()
     @app_commands.describe(
-        uzytkownik="Użytkownik do wypisania (jeśli puste, wypisuje siebie)",
+        uzytkownik="Użytkownik do wypisania",
     )
-    async def misja_zapisy_wypisz(self, interaction: discord.Interaction, uzytkownik: discord.Member = None):
-        if uzytkownik is None:
-            uzytkownik = interaction.user
+    async def misja_zapisy_wypisz(self, interaction: discord.Interaction, uzytkownik: discord.Member):
             
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
@@ -700,11 +702,10 @@ class MissionsCog(commands.Cog):
         creator_user_id = rows[4] if rows else None
         
         # Only admins or the mission creator can remove someone else.
-        is_self_remove = (uzytkownik == interaction.user)
         is_admin = interaction.user.guild_permissions.administrator
         is_creator = (interaction.user.id == creator_user_id)
 
-        if not is_self_remove and not (is_admin or is_creator):
+        if not (is_admin or is_creator):
             logger.info(
             "User %s (%s) attempted to remove another user %s (%s) from mission (%s) without permission.",
             interaction.user, interaction.user.id, uzytkownik, uzytkownik.id, mission_name
