@@ -299,8 +299,6 @@ class TrainingsCog(commands.Cog):
         message_content = "\n".join(lines)
         
         await interaction.channel.send(message_content)
-        channel = self.bot.get_channel(self.bot.channels["attendance_channel_id"])
-        await channel.send(message_content)
 
         await interaction.response.send_message("Obecność została zapisana, a rola nadana obecnym uczestnikom.", ephemeral=True)
         logger.info(f"Attendance for training {training_name} ({training_date}) recorded by {interaction.user.name}.")
