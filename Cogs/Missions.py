@@ -177,12 +177,17 @@ class SignOutButton(discord.ui.Button):
         mission_id = rows[0] if rows else None
         mission_name = rows[1] if rows else None
         creator_user_id = rows[4] if rows else None
+        date = rows[5] if rows else None
         
         rows = await Slots.get_by_mission_and_user(interaction.client.db, mission_id, interaction.user.id)
         if not rows:
             await interaction.response.send_message(f"Nie jesteś zapisany na misję {mission_name}.", ephemeral=True)
             return
         message_id = rows[1]
+        
+        if datetime.datetime.strptime(date, "%Y-%m-%d %H:%M") < datetime.datetime.now() + datetime.timedelta(hours=12):
+            await interaction.response.send_message("Tylko twórca misji, bądź sztab, może cię wypisać na mniej niż 12 godzin przed jej rozpoczęciem.", ephemeral=True)
+            return
         
         # Remove the user from slot and rebuild the view
         await Slots.remove_user_from_slot(interaction.client.db, mission_id, interaction.user.id)
@@ -192,7 +197,6 @@ class SignOutButton(discord.ui.Button):
                 await cog._rebuild_signup_message(
                     channel=interaction.channel, mission_id=mission_id, message_id=message_id
                 )
-            
         except (discord.NotFound, discord.Forbidden):
             pass
         except Exception as e:
@@ -297,13 +301,15 @@ class MissionsCog(commands.Cog):
         if delay > 0:
             await asyncio.sleep(delay)
 
-    def _schedule_at(self, when: datetime.datetime, coro_func, *args) -> None:
+    def _schedule_at(self, when: datetime.datetime, coro_func, *args, **metadata) -> None:
         """Fire `coro_func(*args)` at datetime `when`."""
         async def runner():
             await self._sleep_until(when)
             await coro_func(*args)
 
         task = asyncio.create_task(runner())
+        if metadata: # Attach metadata to taks for later inspection
+            task._metadata = metadata
         self._scheduled_tasks.add(task)
         task.add_done_callback(self._scheduled_tasks.discard)
     
@@ -317,20 +323,20 @@ class MissionsCog(commands.Cog):
             for row in rows:
                 mission_name = row[1]
                 channel_id = row[2]
-                date_str = row[3]
+                date_str = row[5]
                 ping_role_id = row[6]
                 
-                date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M")
                 reminder_time = date - datetime.timedelta(hours=1)
                 if reminder_time > datetime.datetime.now():
-                    self._schedule_at(reminder_time, self._mission_reminder, channel_id, mission_name, date, ping_role_id)
+                    self._schedule_at(reminder_time, self._mission_reminder, channel_id, mission_name, date, ping_role_id, channel_id=channel_id)
         except Exception as e:
             logger.exception("Error while restoring mission reminders", exc_info=e)
             pass
 
     async def _mission_reminder(self, channel_id: int, mission_name: str, when: datetime.datetime, ping_role_id: int) -> None:
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-        await channel.send(f"⏰ <@&{ping_role_id}> Misja **{mission_name}** odbędzie się za godzinę! ({when:%Y-%m-%d %H:%M:%S})")
+        await channel.send(f"⏰ <@&{ping_role_id}> Misja **{mission_name}** odbędzie się za godzinę! ({when:%Y-%m-%d %H:%M})")
         
     async def _mission_announce(self, channel_id: int, mission_name: str, when: datetime.datetime, ping_role_id: int) -> None:
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
@@ -353,10 +359,10 @@ class MissionsCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(
         nazwa="Nazwa misji",
-        data="Data i czas misji np. 2026-01-08 18:30:00 (YYYY-MM-DD HH:MM:SS)",
-        rola_ping="Rola do pingowania przy przypomnieniach i ogłoszeniach misji. (Najlepiej używać ról Arma 3 lub Arma Reforger)",
+        data="Data i czas misji np. 2026-01-08 18:30 (YYYY-MM-DD HH:MM)",
+        czy_ping="Czy dać ping na misję?",
     )
-    async def misja_stworz(self, interaction: discord.Interaction, nazwa: str, data: str, rola_ping: discord.Role):
+    async def misja_stworz(self, interaction: discord.Interaction, nazwa: str, data: str, czy_ping: bool):
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
         
@@ -379,6 +385,20 @@ class MissionsCog(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień do tworzenia misji.", ephemeral=True)
             return
         
+        # Validate correct channel for mission creation if configured
+        scheduled_missions_channel_id = self.bot.channels.get("scheduled_missions_channel_id")
+        if scheduled_missions_channel_id:
+            channel = interaction.channel
+            
+            if isinstance(channel, discord.Thread):
+                channel_id = channel.parent.id
+            else:
+                channel_id = channel.id
+                
+            if channel_id != scheduled_missions_channel_id:
+                await interaction.response.send_message("Nieodpowiedni kanał. Misje muszą być tworzone w kanale od misji.", ephemeral=True)
+                return
+        
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
         if rows: # Validation of existing mission in channel
             await interaction.response.send_message("W tym kanale już istnieje misja.", ephemeral=True)
@@ -386,21 +406,24 @@ class MissionsCog(commands.Cog):
         
         if data: # Validate date format
             try:
-                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M:%S")
+                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M")
                 data = datetime_obj.isoformat(sep=' ')
             except ValueError:
-                await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM:SS.", ephemeral=True)
+                await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM.", ephemeral=True)
                 return
             
         if datetime_obj < datetime.datetime.now(): # Validate date is in the future
             await interaction.response.send_message("Data misji musi być w przyszłości.", ephemeral=True)
             return
         
-        reminder_time = datetime_obj - datetime.timedelta(hours=1)
-        self._schedule_at(reminder_time, self._mission_reminder, interaction.channel.id, nazwa, datetime_obj, rola_ping.id)
-        
-        announce_time = datetime.datetime.now() + datetime.timedelta(hours=1)
-        self._schedule_at(announce_time, self._mission_announce, interaction.channel.id, nazwa, datetime_obj, rola_ping.id) 
+        if czy_ping:
+            ping_role_id = self.bot.roles.get("mission_ping_role_id", 0)
+            
+            reminder_time = datetime_obj - datetime.timedelta(hours=1)
+            self._schedule_at(reminder_time, self._mission_reminder, interaction.channel.id, nazwa, datetime_obj, ping_role_id, channel_id=interaction.channel.id)
+            
+            announce_time = datetime.datetime.now() + datetime.timedelta(hours=1)
+            self._schedule_at(announce_time, self._mission_announce, interaction.channel.id, nazwa, datetime_obj, ping_role_id, channel_id=interaction.channel.id) 
         
         # Create mission entry in DB
         await Missions.create(
@@ -435,6 +458,13 @@ class MissionsCog(commands.Cog):
             await interaction.response.send_message("Tylko twórca misji może anulować misję.", ephemeral=True)
             return
         
+        # Cancel scheduled tasks related to this mission
+        for task in list(self._scheduled_tasks):
+            metadata = getattr(task, "_metadata", {})
+            if metadata.get("channel_id") == interaction.channel.id:
+                task.cancel()
+                self._scheduled_tasks.discard(task)
+        
         # Cleanup views and messages
         rows = await Squads.get_by_mission(self.bot.db, mission_id)
         for row in rows:
@@ -461,7 +491,7 @@ class MissionsCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(
         nazwa="Nowa nazwa misji (opcjonalne)",
-        data="Nowa data i czas misji np. 2026-01-08 18:30:00 (YYYY-MM-DD HH:MM:SS) (opcjonalne)",
+        data="Nowa data i czas misji np. 2026-01-08 18:30 (YYYY-MM-DD HH:MM) (opcjonalne)",
     )
     async def misja_edytuj(self, interaction: discord.Interaction, nazwa: str = None, data: str = None):
         if not nazwa and not data: # Validation of inputs
@@ -656,11 +686,9 @@ class MissionsCog(commands.Cog):
     )
     @app_commands.guild_only()
     @app_commands.describe(
-        uzytkownik="Użytkownik do wypisania (jeśli puste, wypisuje siebie)",
+        uzytkownik="Użytkownik do wypisania",
     )
-    async def misja_zapisy_wypisz(self, interaction: discord.Interaction, uzytkownik: discord.Member = None):
-        if uzytkownik is None:
-            uzytkownik = interaction.user
+    async def misja_zapisy_wypisz(self, interaction: discord.Interaction, uzytkownik: discord.Member):
             
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
@@ -674,11 +702,10 @@ class MissionsCog(commands.Cog):
         creator_user_id = rows[4] if rows else None
         
         # Only admins or the mission creator can remove someone else.
-        is_self_remove = (uzytkownik == interaction.user)
         is_admin = interaction.user.guild_permissions.administrator
         is_creator = (interaction.user.id == creator_user_id)
 
-        if not is_self_remove and not (is_admin or is_creator):
+        if not (is_admin or is_creator):
             logger.info(
             "User %s (%s) attempted to remove another user %s (%s) from mission (%s) without permission.",
             interaction.user, interaction.user.id, uzytkownik, uzytkownik.id, mission_name
@@ -708,6 +735,41 @@ class MissionsCog(commands.Cog):
 
         logger.info(f"User {interaction.user} ({interaction.user.id}) removed user {uzytkownik} ({uzytkownik.id}) from mission {mission_name} in channel {interaction.channel.id}")
         await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} został wypisany z misji {mission_name}.", ephemeral=True)
+        
+    # # /misja_zapisy_wpisz
+    # @app_commands.command(
+    #     name="misja_zapisy_wpisz",
+    #     description="Wpisuje użytkownika do misji.",
+    #     extras={"category": "Misje"},
+    # )
+    # @app_commands.guild_only()
+    # @app_commands.describe(
+    #     uzytkownik="Użytkownik do wpisania",
+        
+    # )
+    # async def misja_zapisy_wpisz(self, interaction: discord.Interaction, uzytkownik: discord.Member, druzyna: str, slot: str):
+    #     if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+    #         return
+        
+    #     rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
+    #     if not rows: # Validation of mission existence
+    #         await interaction.response.send_message("Ta komenda może być użyta tylko w kanale misji.", ephemeral=True)
+    #         return
+    #     mission_id = rows[0]
+    #     creator_user_id = rows[4]
+        
+    #     if creator_user_id != interaction.user.id and not interaction.user.guild_permissions.administrator: # Validation of permissions
+    #         await interaction.response.send_message("Tylko twórca misji może wpisywać użytkowników do zapisów.", ephemeral=True)
+    #         return
+        
+    #     # Get the message_id for the specified team
+    #     rows = await Squads.get_by_name(self.bot.db, mission_id, druzyna)
+    #     if not rows:
+    #         await interaction.response.send_message(f"Nie znaleziono drużyny o podanej nazwie {druzyna}.", ephemeral=True)
+    #         return
+    #     message_id = rows[0]
+        
+        
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(MissionsCog(bot))

@@ -48,6 +48,7 @@ with open("configuration.json", "r", encoding="utf-8") as config:
     ticket_system = data.get("ticket_system", {})
     message_triggers = data.get("message_triggers", [])
     messages = data.get("messages", {})
+    leveling_system = data.get("leveling_system", {})
 
 # Load .env variables
 load_dotenv()
@@ -101,6 +102,7 @@ class MyBot(commands.Bot):
         self.ticket_system = ticket_system
         self.message_triggers = message_triggers
         self.messages = messages
+        self.leveling_system = leveling_system
         
     
     # Load cogs
@@ -156,6 +158,7 @@ class MyBot(commands.Bot):
             data["ticket_system"] = self.ticket_system
             data["message_triggers"] = self.message_triggers
             data["messages"] = self.messages
+            data["leveling_system"] = self.leveling_system
             
         with open("configuration.json", "w", encoding="utf-8") as config:
             json.dump(data, config, indent=4)

@@ -14,12 +14,6 @@ class Arrival(commands.Cog):
         self.log_channel_id = self.bot.channels.get("log_channel_id")
         self.invites = {}
 
-
-    # Don't implement until new structure is ready
-    # TODO: Implement dm welcome message to explain next steps
-    # TODO: Assign start roles
-    # TODO: Invite tracking
-    # TODO: Log arrivals to specified channel
     
     @commands.Cog.listener()
     async def on_ready(self):
@@ -116,11 +110,11 @@ class Arrival(commands.Cog):
             if log_channel and isinstance(log_channel, discord.TextChannel):
                 embed = discord.Embed(
                     title="Nowy członek dołączył",
-                    description=f"{member.mention} ({member.id}) dołączył do serwera.",
+                    description=f"{member.mention} ({member.name}) ({member.id}) dołączył do serwera.",
                     color=discord.Color.green()
                 )
                 embed.set_thumbnail(url=member.display_avatar.url)
-                embed.add_field(name="Dołączył", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+                embed.add_field(name="Dołączył", value=member.joined_at.strftime("%Y-%m-%d %H:%M"), inline=False)
                 embed.add_field(name="Zaproszony przez", value=used_invite.inviter.mention if used_invite and used_invite.inviter else "Nieznany", inline=False)
                 embed.add_field(name="Całkowita liczba członków", value=str(member.guild.member_count), inline=False)
                 await log_channel.send(embed=embed)

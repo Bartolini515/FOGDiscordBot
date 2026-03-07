@@ -148,7 +148,7 @@ class TrainingsCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(
         nazwa="Nazwa szkolenia",
-        data="Data szkolenia np. 2026-01-08 18:30:00 (YYYY-MM-DD HH:MM:SS)",
+        data="Data szkolenia np. 2026-01-08 18:30 (YYYY-MM-DD HH:MM)",
     )
     async def szkolenie_stworz(self, interaction: discord.Interaction, nazwa: str, data: str):
         if not hasattr(self.bot, "db") or self.bot.db is None:
@@ -174,10 +174,10 @@ class TrainingsCog(commands.Cog):
 
         if data: # Validate date format
             try:
-                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M:%S")
+                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M")
                 data = datetime_obj.isoformat(sep=' ')
             except ValueError:
-                await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM:SS.", ephemeral=True)
+                await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM.", ephemeral=True)
                 return
 
         training_id = await Trainings.create(
@@ -299,8 +299,6 @@ class TrainingsCog(commands.Cog):
         message_content = "\n".join(lines)
         
         await interaction.channel.send(message_content)
-        channel = self.bot.get_channel(self.bot.channels["attendance_channel_id"])
-        await channel.send(message_content)
 
         await interaction.response.send_message("Obecność została zapisana, a rola nadana obecnym uczestnikom.", ephemeral=True)
         logger.info(f"Attendance for training {training_name} ({training_date}) recorded by {interaction.user.name}.")
