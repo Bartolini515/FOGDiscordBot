@@ -24,7 +24,7 @@ SET
             warns
         WHERE
             warns.user_id = NEW.user_id
-            AND (added_at > TIMESTAMP('now', '-30 days'))
+            AND (added_at > datetime ('now', '-30 days'))
     )
 WHERE
     user_id = NEW.user_id;
@@ -41,7 +41,7 @@ SET
             warns
         WHERE
             warns.user_id = OLD.user_id
-            AND (added_at > TIMESTAMP('now', '-30 days'))
+            AND (added_at > datetime ('now', '-30 days'))
     )
 WHERE
     user_id = OLD.user_id;

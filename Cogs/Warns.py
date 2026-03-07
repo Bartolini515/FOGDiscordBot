@@ -40,6 +40,11 @@ class WarnsCog(commands.Cog):
         await Warns.create(self.bot.db, user_id=uzytkownik.id, reason=powod)
         logger.info(f"Added warn to user {uzytkownik} for reason: {powod}")
         
+        # Get user's current warn count and send a response
+        row = await Users.get_user(self.bot.db, user_id=uzytkownik.id)
+        warn_count = row[8] if row else 0
+        await interaction.response.send_message(f"Dodano warna użytkownikowi {uzytkownik.mention} za powód: {powod}.\nObecna liczba warnów: {warn_count}.")
+        
     # /warn_remove
     @app_commands.command(
         name="warn_remove",
@@ -88,7 +93,7 @@ class WarnsCog(commands.Cog):
         
         embed = discord.Embed(title=f"Warny użytkownika {uzytkownik}", color=discord.Color.orange())
         for warn in rows:
-            embed.add_field(name=f"Warn ID: {warn[0]}", value=f"Powód: {warn[2]}\nDodany: {warn[3].strftime('%Y-%m-%d')}\nWygasł: {'Tak' if warn[4] else 'Nie'}", inline=False)
+            embed.add_field(name=f"Warn ID: {warn[0]}", value=f"Powód: {warn[2]}\nDodany: {warn[3].split(' ')[0]}\nWygasł: {'Tak' if warn[4] else 'Nie'}", inline=False)
         
         await interaction.response.send_message(embed=embed)
         
@@ -99,10 +104,6 @@ class WarnsCog(commands.Cog):
         extras={"category": "Warny"},
     )
     @app_commands.guild_only()
-    @app_commands.describe(
-        uzytkownik="Użytkownik, któremu chcesz dodać warna.",
-        powod="Powód dodania warna."
-    )
     async def warn_list_users(self, interaction: discord.Interaction):
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return

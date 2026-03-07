@@ -35,10 +35,10 @@ class Users:
             db (_type_): Database to be used
 
         Returns:
-            fetchall: user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild
+            fetchall: user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild, warn_count
         """
         cursor = await db.conn.execute(
-            "SELECT user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild FROM users",
+            "SELECT user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild, warn_count FROM users",
         )
         return await cursor.fetchall()
         
@@ -51,10 +51,10 @@ class Users:
             user_id (int): Discord user id
 
         Returns:
-            fetchone: user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild
+            fetchone: user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild, warn_count
         """
         cursor = await db.conn.execute(
-            "SELECT user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild "
+            "SELECT user_id, username, level, experience, rank_id, joined_at, last_message_at, on_guild, warn_count "
             "FROM users WHERE user_id = ?",
             (user_id,)
         )
@@ -1348,7 +1348,9 @@ class Warns:
             db (_type_): Database to be used
         """
         await db.conn.execute(
-            "UPDATE warns SET expired = 1 WHERE added_at <= TIMESTAMP('now', '-30 days');"
-            "UPDATE users SET warns_count = (SELECT COUNT(*) FROM warns WHERE user_id = users.user_id AND expired = 0);"
+            "UPDATE warns SET expired = 1 WHERE added_at <= datetime ('now', '-30 days')"
+        )
+        await db.conn.execute(
+            "UPDATE users SET warn_count = (SELECT COUNT(*) FROM warns WHERE user_id = users.user_id AND expired = 0)"
         )
         await db.conn.commit()
