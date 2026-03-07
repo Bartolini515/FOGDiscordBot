@@ -38,6 +38,7 @@ class WarnsCog(commands.Cog):
         
         # Add the warn to the database
         await Warns.create(self.bot.db, user_id=uzytkownik.id, reason=powod)
+        logger.info(f"Added warn to user {uzytkownik} for reason: {powod}")
         
     # /warn_remove
     @app_commands.command(
@@ -62,6 +63,7 @@ class WarnsCog(commands.Cog):
         
         await Warns.delete(self.bot.db, id=warn_id)
         await interaction.response.send_message(f"Warn o ID {warn_id} został usunięty.")
+        logger.info(f"Removed warn with ID {warn_id} for user ID {warn[1]}")
 
     # /warn_check
     @app_commands.command(
