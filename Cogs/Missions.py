@@ -185,7 +185,7 @@ class SignOutButton(discord.ui.Button):
             return
         message_id = rows[1]
         
-        if datetime.datetime.strptime(date, "%Y-%m-%d %H:%M") < datetime.datetime.now() + datetime.timedelta(hours=12):
+        if datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S") < datetime.datetime.now() + datetime.timedelta(hours=12):
             await interaction.response.send_message("Tylko twórca misji, bądź sztab, może cię wypisać na mniej niż 12 godzin przed jej rozpoczęciem.", ephemeral=True)
             return
         
