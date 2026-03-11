@@ -184,6 +184,8 @@ class Level(commands.Cog):
         else:
             self._notifications_off_users_cache[user_id] = 1
             await interaction.response.send_message("Powiadomienia o awansach poziomów zostały wyłączone.", ephemeral=True)
+            
+        self.bot.leveling_system["notifications_off_users"] = list(self._notifications_off_users_cache.keys())
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(Level(bot))
