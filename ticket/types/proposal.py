@@ -79,5 +79,5 @@ class ProposalForwardButton(discord.ui.Button):
             await message.add_reaction("👍")
             await message.add_reaction("👎")
             
-            await interaction.followup.send("Propozycja przekazana.", ephemeral=True)
+            await interaction.followup.send("Propozycja przekazana.", ephemeral=False)
 

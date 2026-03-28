@@ -67,7 +67,7 @@ class WarnsCog(commands.Cog):
             return
         
         await Warns.delete(self.bot.db, id=warn_id)
-        await interaction.response.send_message(f"Warn o ID {warn_id} został usunięty.")
+        await interaction.response.send_message(f"Warn o ID {warn_id} został usunięty.", ephemeral=True)
         logger.info(f"Removed warn with ID {warn_id} for user ID {warn[1]}")
 
     # /warn_check
@@ -95,7 +95,7 @@ class WarnsCog(commands.Cog):
         for warn in rows:
             embed.add_field(name=f"Warn ID: {warn[0]}", value=f"Powód: {warn[2]}\nDodany: {warn[3].split(' ')[0]}\nWygasł: {'Tak' if warn[4] else 'Nie'}", inline=False)
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         
     # /warn_list_users
     @app_commands.command(
@@ -119,7 +119,7 @@ class WarnsCog(commands.Cog):
         for user_id, username, warn_count in users_with_warns:
             embed.add_field(name=username, value=f"Liczba warnów: {warn_count}", inline=False)
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
     
 async def setup(bot: commands.Bot):
     await bot.add_cog(WarnsCog(bot))
