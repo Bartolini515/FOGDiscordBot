@@ -1,3 +1,5 @@
+import asyncio
+
 import discord
 from datetime import datetime
 from discord.ext import commands
@@ -132,24 +134,8 @@ class MyBot(commands.Bot):
             logger.debug(f"Guild members: {members}")
         await Users.update_users_on_startup(self.db, members)
         logger.info("Users on_guild status updated.")
-
-    # Before startup
-    async def setup_hook(self):
-        await self.db.connect()
-        await self._load_cogs()
-        guild = discord.Object(id=self.guild_id)
-        self.tree.copy_global_to(guild=guild)
-        await self.tree.sync(guild=guild)
-
-    # On startup
-    async def on_ready(self):
-        logger.info(f"We have logged in as {self.user}")
-        logger.info(discord.__version__)
-        await self._update_users_on_guild_status()
         
-    # On shutdown
-    async def close(self):
-        # Save changes in configuration file
+    async def _save_configuration(self):
         with open("configuration.json", "r", encoding="utf-8") as config:
             data = json.load(config)
             data["permissions"] = self.permissions
@@ -162,6 +148,31 @@ class MyBot(commands.Bot):
             
         with open("configuration.json", "w", encoding="utf-8") as config:
             json.dump(data, config, indent=4)
+            
+    async def _autosave_task(self):
+        while True:
+            await asyncio.sleep(3600)  # Save every hour
+            await self._save_configuration()
+
+    # Before startup
+    async def setup_hook(self):
+        await self.db.connect()
+        await self._load_cogs()
+        guild = discord.Object(id=self.guild_id)
+        self.tree.copy_global_to(guild=guild)
+        await self.tree.sync(guild=guild)
+        self.loop.create_task(self._autosave_task())
+
+    # On startup
+    async def on_ready(self):
+        logger.info(f"We have logged in as {self.user}")
+        logger.info(discord.__version__)
+        await self._update_users_on_guild_status()
+        
+    # On shutdown
+    async def close(self):
+        # Save changes in configuration file
+        await self._save_configuration()
         
         await self.db.close()
         await super().close()
