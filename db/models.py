@@ -458,6 +458,21 @@ class Ranks:
         return await cursor.fetchone()
     
     @staticmethod
+    async def get_max_rank(db):
+        """Gets the rank with the highest required missions
+
+        Args:
+            db (_type_): Database to be used
+
+        Returns:
+            fetchone: id, name, role_id, required_missions
+        """
+        cursor = await db.conn.execute(
+            "SELECT id, name, role_id, required_missions FROM ranks ORDER BY required_missions DESC LIMIT 1",
+        )
+        return await cursor.fetchone()
+    
+    @staticmethod
     async def list(db):
         """Lists all ranks
 
