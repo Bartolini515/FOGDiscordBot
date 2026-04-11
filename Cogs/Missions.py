@@ -326,7 +326,10 @@ class MissionsCog(commands.Cog):
                 date_str = row[5]
                 ping_role_id = row[6]
                 
-                date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M")
+                try:
+                    date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M")
                 reminder_time = date - datetime.timedelta(hours=1)
                 if reminder_time > datetime.datetime.now():
                     self._schedule_at(reminder_time, self._mission_reminder, channel_id, mission_name, date, ping_role_id, channel_id=channel_id)
@@ -507,6 +510,8 @@ class MissionsCog(commands.Cog):
             return
         mission_id = rows[0]
         creator_user_id = rows[4]
+        nazwa = nazwa if nazwa else rows[1]
+        data = data if data else rows[5]
         
         if creator_user_id != interaction.user.id and not interaction.user.guild_permissions.administrator: # Validation of permissions
             await interaction.response.send_message("Tylko twórca misji może edytować misję.", ephemeral=True)
