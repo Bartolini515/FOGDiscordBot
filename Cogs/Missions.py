@@ -326,6 +326,9 @@ class MissionsCog(commands.Cog):
                 date_str = row[5]
                 ping_role_id = row[6]
                 
+                if not date_str or not ping_role_id:
+                    continue
+                
                 try:
                     date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
@@ -435,6 +438,7 @@ class MissionsCog(commands.Cog):
             channel_id=interaction.channel.id,
             creator_user_id=interaction.user.id,
             date=data,
+            ping_role_id=ping_role_id if czy_ping else None,
         )
         logger.info(f"User {interaction.user} ({interaction.user.id}) created mission {nazwa} in channel {interaction.channel.id}")
         await interaction.response.send_message(f"Utworzono instancję misji o nazwie {nazwa} w tym kanale. Ten kanał służy teraz jako kanał misji."

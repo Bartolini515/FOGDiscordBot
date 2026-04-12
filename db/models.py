@@ -501,7 +501,7 @@ class Missions:
     FOREIGN KEY(creator_user_id) REFERENCES users(user_id) ON DELETE SET NULL
     """
     @staticmethod
-    async def create(db, channel_id: int, name: str, creator_user_id: int, date: str):
+    async def create(db, channel_id: int, name: str, creator_user_id: int, date: str, ping_role_id: int = None):
         """Creates a new mission
 
         Args:
@@ -510,10 +510,11 @@ class Missions:
             name (str): Name of the mission
             creator_user_id (int): Discord user id of the creator.
             date (str): Date of the mission
+            ping_role_id (int, optional): Discord role id to ping for the mission. Defaults to None.
         """
         await db.conn.execute(
-            "INSERT INTO missions (channel_id, name, creator_user_id, date) VALUES (?, ?, ?, ?)",
-            (channel_id, name, creator_user_id, date)
+            "INSERT INTO missions (channel_id, name, creator_user_id, date, ping_role_id) VALUES (?, ?, ?, ?, ?)",
+            (channel_id, name, creator_user_id, date, ping_role_id)
         )
         await db.conn.commit()
         
