@@ -170,6 +170,7 @@ class SignOutButton(discord.ui.Button):
         self.custom_id_ = custom_id  # custom_id_ written that way to avoid conflict with parent custom_id property
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         rows = await Missions.get_channel(interaction.client.db, interaction.channel.id)
         if not rows: # Validation of mission existence
             await interaction.response.send_message("Ta komenda może być użyta tylko w kanale misji.", ephemeral=True)
@@ -198,12 +199,13 @@ class SignOutButton(discord.ui.Button):
                     channel=interaction.channel, mission_id=mission_id, message_id=message_id
                 )
         except (discord.NotFound, discord.Forbidden):
+            logger.warning("Message for rebuilding signup not found or no permissions to edit")
             pass
         except Exception as e:
             logger.exception("Error while rebuilding signup message after removing user", exc_info=e)
 
         logger.info(f"User {interaction.user} ({interaction.user.id}) signed out from mission {mission_name} in channel {interaction.channel.id}")
-        await interaction.response.send_message(f"Wypisałeś się z misji {mission_name}.", ephemeral=True)
+        await interaction.followup.send(f"Wypisałeś się z misji {mission_name}.", ephemeral=True)
 
 
 
@@ -698,7 +700,7 @@ class MissionsCog(commands.Cog):
         uzytkownik="Użytkownik do wypisania",
     )
     async def misja_zapisy_wypisz(self, interaction: discord.Interaction, uzytkownik: discord.Member):
-            
+        await interaction.response.defer(ephemeral=True)
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
         
@@ -738,13 +740,14 @@ class MissionsCog(commands.Cog):
                 channel=interaction.channel, mission_id=mission_id, message_id=message_id
             )
         except (discord.NotFound, discord.Forbidden):
+            logger.warning("Message for rebuilding signup not found or no permissions to edit")
             pass
         except Exception as e:
             logger.exception("Error while rebuilding signup message after removing user", exc_info=e)
 
         logger.info(f"User {interaction.user} ({interaction.user.id}) removed user {uzytkownik} ({uzytkownik.id}) from mission {mission_name} in channel {interaction.channel.id}")
-        await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} został wypisany z misji {mission_name}.", ephemeral=True)
-        
+        await interaction.followup.send(f"Użytkownik {uzytkownik.mention} został wypisany z misji {mission_name}.", ephemeral=True)
+
     # # /misja_zapisy_wpisz
     # @app_commands.command(
     #     name="misja_zapisy_wpisz",
