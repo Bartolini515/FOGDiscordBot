@@ -186,7 +186,17 @@ class SignOutButton(discord.ui.Button):
             return
         message_id = rows[1]
         
-        if datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S") < datetime.datetime.now() + datetime.timedelta(hours=12):
+        try:
+            mission_date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                mission_date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M")
+            except ValueError:
+                # Handle invalid date format
+                await interaction.followup.send("Skontaktuj się z administratorem. Zły format daty misji w bazie danych.", ephemeral=True)
+                return
+
+        if mission_date < datetime.datetime.now() + datetime.timedelta(hours=12):
             await interaction.response.send_message("Tylko twórca misji, bądź sztab, może cię wypisać na mniej niż 12 godzin przed jej rozpoczęciem.", ephemeral=True)
             return
         
