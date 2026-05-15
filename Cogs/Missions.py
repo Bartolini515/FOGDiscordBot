@@ -520,6 +520,18 @@ class MissionsCog(commands.Cog):
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
         
+        if data: # Validate date format
+            try:
+                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M")
+                data = datetime_obj.isoformat(sep=' ')
+            except ValueError:
+                await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM.", ephemeral=True)
+                return
+            
+        if datetime_obj < datetime.datetime.now(): # Validate date is in the future
+            await interaction.response.send_message("Data misji musi być w przyszłości.", ephemeral=True)
+            return
+        
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
         if not rows: # Validation of mission existence
             await interaction.response.send_message("Ta komenda może być użyta tylko w kanale misji.", ephemeral=True)
@@ -532,6 +544,19 @@ class MissionsCog(commands.Cog):
         if creator_user_id != interaction.user.id and not interaction.user.guild_permissions.administrator: # Validation of permissions
             await interaction.response.send_message("Tylko twórca misji może edytować misję.", ephemeral=True)
             return
+        
+        ping_role_id = self.bot.roles.get("mission_ping_role_id", 0)
+        for task in list(self._scheduled_tasks):
+            metadata = getattr(task, "_metadata", {})
+            if metadata.get("channel_id") == interaction.channel.id:
+                task.cancel()
+                self._scheduled_tasks.discard(task)
+                
+                reminder_time = datetime_obj - datetime.timedelta(hours=1)
+                self._schedule_at(reminder_time, self._mission_reminder, interaction.channel.id, nazwa, datetime_obj, ping_role_id, channel_id=interaction.channel.id)
+                
+                announce_time = datetime.datetime.now() + datetime.timedelta(hours=1)
+                self._schedule_at(announce_time, self._mission_announce, interaction.channel.id, nazwa, datetime_obj, ping_role_id, channel_id=interaction.channel.id) 
         
         # Update mission in DB
         await Missions.update(self.bot.db, mission_id=mission_id, name=nazwa, date=data)
