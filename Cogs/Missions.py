@@ -197,7 +197,7 @@ class SignOutButton(discord.ui.Button):
                 return
 
         if mission_date < datetime.datetime.now() + datetime.timedelta(hours=12):
-            await interaction.response.send_message("Tylko twórca misji, bądź sztab, może cię wypisać na mniej niż 12 godzin przed jej rozpoczęciem.", ephemeral=True)
+            await interaction.followup.send("Tylko twórca misji, bądź sztab, może cię wypisać na mniej niż 12 godzin przed jej rozpoczęciem.", ephemeral=True)
             return
         
         # Remove the user from slot and rebuild the view
