@@ -454,7 +454,7 @@ class MissionsCog(commands.Cog):
         )
         logger.info(f"User {interaction.user} ({interaction.user.id}) created mission {nazwa} in channel {interaction.channel.id}")
         await interaction.response.send_message(f"Utworzono instancję misji o nazwie {nazwa} w tym kanale. Ten kanał służy teraz jako kanał misji."
-                                                "\nZa godzinę zostanie wysłane powiadomienie o jej stworzeniu.", ephemeral=True)
+                                                f'{"\nZa godzinę zostanie wysłane powiadomienie o jej stworzeniu." if czy_ping else ""}', ephemeral=True)
         
     # /misja_anuluj
     @app_commands.command(
