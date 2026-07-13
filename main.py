@@ -51,6 +51,7 @@ with open("configuration.json", "r", encoding="utf-8") as config:
     message_triggers = data.get("message_triggers", [])
     messages = data.get("messages", {})
     leveling_system = data.get("leveling_system", {})
+    honeypot_system = data.get("honeypot_system", {})
 
 # Load .env variables
 load_dotenv()
@@ -105,6 +106,7 @@ class MyBot(commands.Bot):
         self.message_triggers = message_triggers
         self.messages = messages
         self.leveling_system = leveling_system
+        self.honeypot_system = honeypot_system
         
     
     # Load cogs
@@ -145,6 +147,7 @@ class MyBot(commands.Bot):
             data["message_triggers"] = self.message_triggers
             data["messages"] = self.messages
             data["leveling_system"] = self.leveling_system
+            data["honeypot_system"] = self.honeypot_system
             
         with open("configuration.json", "w", encoding="utf-8") as config:
             json.dump(data, config, indent=4)
