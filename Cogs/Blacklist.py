@@ -75,6 +75,8 @@ class BlacklistCog(commands.Cog):
             user_id, reason, expires_at, added_at, username = entry
             username = f"{username} ({user_id})"
             expires_str = expires_at if expires_at else "Nigdy"
+            if expires_at and datetime.strptime(expires_at, "%Y-%m-%d %H:%M") < datetime.now():
+                expires_str = "Wygasło"
             embed.add_field(name=username, value=f"Powód: {reason}\nDodany: {str(added_at).split( )[0]}\nWygasa: {expires_str}", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
