@@ -1,6 +1,7 @@
+"""Ticket commands, lifecycle views, transcripts, and restart restoration."""
+
 import os
 import io
-import json
 import logging
 import html
 import discord
@@ -31,6 +32,7 @@ class TicketsCog(commands.Cog):
         self._registered_ticket_views: set[int] = set()  # channel_ids
 
     async def cog_load(self):
+        """Restore ticket-create and ticket-management persistent views."""
         await self._restore_ticket_create_messages()
         await self._restore_ticket_views()
 
@@ -45,6 +47,7 @@ class TicketsCog(commands.Cog):
         return perms.manage_messages
 
     async def _restore_ticket_create_messages(self):
+        """Recreate ticket entry views from serialized category payloads."""
         try:
             if not hasattr(self.bot, "db") or self.bot.db is None:
                 return
@@ -79,6 +82,7 @@ class TicketsCog(commands.Cog):
             logger.exception("Error while restoring ticket create views", exc_info=e)
 
     async def _restore_ticket_views(self):
+        """Register open or closed management views for stored ticket channels."""
         try:
             if not hasattr(self.bot, "db") or self.bot.db is None:
                 return

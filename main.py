@@ -1,34 +1,28 @@
+"""Start the single-guild Discord bot and own its process lifecycle."""
+
 import asyncio
 
 import discord
 from datetime import datetime
 from discord.ext import commands
-from discord import app_commands
 from dotenv import load_dotenv
 import logging
 from logging.handlers import RotatingFileHandler
 import json
 import os
+from pathlib import Path
+
+from configuration import ConfigurationError, ensure_configuration_file, load_configuration
 from db.database import Database
 from db.models import Users
 
-# Create configuration file if it doesn't exist
-if not os.path.exists("configuration.json"):
-    with open("configuration.json", "w", encoding="utf-8") as config:
-        json.dump({
-            "prefix": "!",
-            "owner_id": 0,
-            "guild_id": 0,
-            "permissions": {},
-            "technical_info": {},
-            "channels": {},
-            "roles": {},
-            "ticket_system": {},
-            "message_triggers": [],
-            "messages": {}
-            }, config, indent=4)
-        print("Created default configuration.json, please edit it and restart the bot.")
-        exit()
+CONFIG_PATH = Path("configuration.json")
+CONFIG_TEMPLATE_PATH = Path(__file__).with_name("configuration.example.json")
+
+# Create a safe local configuration without overwriting an existing file.
+if ensure_configuration_file(CONFIG_PATH, CONFIG_TEMPLATE_PATH):
+    print("Created configuration.json from configuration.example.json. Please edit it and restart the bot.")
+    raise SystemExit(1)
 
 # Create .env file if it doesn't exist
 if not os.path.exists(".env"):
@@ -38,20 +32,24 @@ if not os.path.exists(".env"):
         exit()
 
 # Load configuration file
-with open("configuration.json", "r", encoding="utf-8") as config: 
-    data = json.load(config)
-    prefix = data["prefix"]
-    owner_id = data["owner_id"]
-    guild_id = data["guild_id"]
-    permissions = data.get("permissions", {})
-    technical_info = data.get("technical_info", {})
-    channels = data.get("channels", {})
-    roles = data.get("roles", {})
-    ticket_system = data.get("ticket_system", {})
-    message_triggers = data.get("message_triggers", [])
-    messages = data.get("messages", {})
-    leveling_system = data.get("leveling_system", {})
-    honeypot_system = data.get("honeypot_system", {})
+try:
+    data = load_configuration(CONFIG_PATH)
+except ConfigurationError as exc:
+    print(f"Invalid configuration.json: {exc}")
+    raise SystemExit(1) from exc
+
+prefix = data["prefix"]
+owner_id = data["owner_id"]
+guild_id = data["guild_id"]
+permissions = data["permissions"]
+technical_info = data["technical_info"]
+channels = data["channels"]
+roles = data["roles"]
+ticket_system = data["ticket_system"]
+message_triggers = data["message_triggers"]
+messages = data["messages"]
+leveling_system = data["leveling_system"]
+honeypot_system = data["honeypot_system"]
 
 # Load .env variables
 load_dotenv()
@@ -93,6 +91,8 @@ intents = discord.Intents.all()
 
 # The bot
 class MyBot(commands.Bot):
+    """FOG bot runtime with shared configuration and one SQLite connection."""
+
     def __init__(self, command_prefix, intents, owner_id, guild_id):
         super().__init__(command_prefix=command_prefix, intents=intents, owner_id=owner_id, help_command=None)
         self.guild_id = guild_id
@@ -111,6 +111,7 @@ class MyBot(commands.Bot):
     
     # Load cogs
     async def _load_cogs(self):
+        """Load every Python extension found directly under ``Cogs``."""
         for filename in os.listdir("Cogs"):
             if filename.endswith(".py"):
                 try:
@@ -121,6 +122,7 @@ class MyBot(commands.Bot):
 
     # Update users currently on guild in db
     async def _update_users_on_guild_status(self):
+        """Reconcile stored membership flags with the configured guild."""
         if not hasattr(self, "db") or self.db is None:
             return
         if not self.get_guild(self.guild_id):
@@ -138,6 +140,7 @@ class MyBot(commands.Bot):
         logger.info("Users on_guild status updated.")
         
     async def _save_configuration(self):
+        """Persist mutable in-memory configuration sections to the local JSON file."""
         with open("configuration.json", "r", encoding="utf-8") as config:
             data = json.load(config)
             data["permissions"] = self.permissions
@@ -153,12 +156,14 @@ class MyBot(commands.Bot):
             json.dump(data, config, indent=4)
             
     async def _autosave_task(self):
+        """Persist runtime configuration once per hour until cancellation."""
         while True:
             await asyncio.sleep(3600)  # Save every hour
             await self._save_configuration()
 
     # Before startup
     async def setup_hook(self):
+        """Migrate SQLite, load cogs, and sync commands to the FOG guild."""
         await self.db.connect()
         await self._load_cogs()
         guild = discord.Object(id=self.guild_id)
@@ -168,12 +173,14 @@ class MyBot(commands.Bot):
 
     # On startup
     async def on_ready(self):
+        """Log the connected identity and reconcile current guild members."""
         logger.info(f"We have logged in as {self.user}")
         logger.info(discord.__version__)
         await self._update_users_on_guild_status()
         
     # On shutdown
     async def close(self):
+        """Save configuration and close SQLite before Discord shutdown."""
         # Save changes in configuration file
         await self._save_configuration()
         

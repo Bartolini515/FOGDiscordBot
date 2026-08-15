@@ -1,8 +1,10 @@
+"""Shared ticket category contracts, persistence helpers, and Discord actions."""
+
 import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 import discord
 
 from db.models import Tickets, TicketTypes, TicketCreateMessages
@@ -19,6 +21,8 @@ logger = logging.getLogger("fogbot")
 
 @dataclass
 class TicketCategory:
+    """Validated configuration needed to create one category of ticket."""
+
     name: str
     description: str
     type_name: str
@@ -33,6 +37,7 @@ TYPE_HANDLERS = {
     "basic_training": BasicTrainingTicketType(),
     "custom": CustomTicketType(),
 }
+"""Normalized ticket type names mapped to shared handler strategies."""
 
 
 def normalize_channel_name(title: str) -> str:
@@ -73,6 +78,7 @@ def build_generic_title(category: TicketCategory, user: discord.abc.User) -> str
 
 
 def get_type_handler(type_name: str):
+    """Return the configured handler, falling back to the custom strategy."""
     return TYPE_HANDLERS.get(type_name, TYPE_HANDLERS["custom"])
 
 
@@ -218,7 +224,7 @@ async def create_ticket_channel(
 ) -> discord.TextChannel:
     channel_name = normalize_channel_name(title)
 
-    overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+    overwrites: dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite] = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
     }
@@ -243,7 +249,7 @@ async def create_ticket_channel(
             manage_messages=True,
         )
 
-    category = guild.get_channel(category_id) if category_id else None
+    category = cast(discord.CategoryChannel | None, guild.get_channel(category_id)) if category_id else None
 
     channel = await guild.create_text_channel(
         name=channel_name,
@@ -263,8 +269,7 @@ async def set_ticket_user_send_permission(
     if not member:
         return
     overwrite = channel.overwrites_for(member)
-    overwrite.send_messages = can_send
-    overwrite.view_channel = True
+    overwrite.update(send_messages=can_send, view_channel=True)
     await channel.set_permissions(member, overwrite=overwrite)
 
 

@@ -1,3 +1,5 @@
+"""Mission lifecycle, signup components, reminders, and roster projection."""
+
 import os
 import discord
 from discord.ext import commands
@@ -14,6 +16,7 @@ logger = logging.getLogger("fogbot")
 debug = os.getenv("DEBUG") == "True"
 
 def _message_content(slots_dict: dict[int, tuple[int, str, int | None]], squad: str) -> str:
+    """Render one squad's positional slot rows as the Discord roster message."""
     header = f"📋 Zapisz się do drużyny **{squad}**:"
     lines = [header]
     for _, (_, label, user) in slots_dict.items():
@@ -41,6 +44,8 @@ def _message_content(slots_dict: dict[int, tuple[int, str, int | None]], squad: 
 
 
 class SlotSelect(discord.ui.Select):
+    """Persistent selector that moves a member to one slot in a mission."""
+
     # {slot_id: (slot_id, slot, user)}
     def __init__(self, slots: dict[int, tuple[int, str, int | None]], squad: str, mission_id: int, custom_id: str | None = None):
         self.logger = logger
@@ -158,6 +163,8 @@ class SlotSelect(discord.ui.Select):
 
 
 class SignOutButton(discord.ui.Button):
+    """Persistent self-service sign-out with the 12-hour cutoff."""
+
     def __init__(self, custom_id: str | None = None):
         params = {
             "label": "Wypisz się",
@@ -177,7 +184,6 @@ class SignOutButton(discord.ui.Button):
             return
         mission_id = rows[0] if rows else None
         mission_name = rows[1] if rows else None
-        creator_user_id = rows[4] if rows else None
         date = rows[5] if rows else None
         
         rows = await Slots.get_by_mission_and_user(interaction.client.db, mission_id, interaction.user.id)
@@ -361,6 +367,7 @@ class MissionsCog(commands.Cog):
         await channel.send(f"🚩 <@&{ping_role_id}> Zapraszam do zapisów na misję **{mission_name}** która odbędzie się {when:%Y-%m-%d}. Szczegóły znajdziecie powyżej!")
 
     async def cog_load(self):
+        """Restore durable signup views and future reminders after cog loading."""
         await self._restore_missions_views()
         await self._restore_missions_reminders()
 

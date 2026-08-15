@@ -1,0 +1,18 @@
+{
+    "prefix": "!",
+    "owner_id": 0,
+    "guild_id": 0,
+    "permissions": {},
+    "technical_info": {},
+    "channels": {},
+    "roles": {},
+    "ticket_system": {},
+    "message_triggers": [],
+    "messages": {},
+    "leveling_system": {},
+    "honeypot_system": {
+        "honeypot_channels": [],
+        "counter_messages": [],
+        "trap_counter": 0
+    }
+}

@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import logging
 from db.models import Users, Blacklist
 from datetime import datetime

@@ -1,3 +1,8 @@
+"""Asynchronous SQLite data-access helpers for the bot's domain records."""
+
+from collections.abc import Sequence
+
+
 class Users:
     """
     user_id: INTEGER PRIMARY KEY UNIQUE,
@@ -136,7 +141,7 @@ class Users:
         await db.conn.commit()
         
     @staticmethod
-    async def update_users_on_startup(db, users: tuple[int, str]):
+    async def update_users_on_startup(db, users: Sequence[tuple[int, str]]):
         """Updates the users table on bot startup to current guild state
 
         Args:
@@ -214,7 +219,7 @@ class Blacklist:
     FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
     """
     @staticmethod
-    async def add_to_blacklist(db, user_id: int, reason: str, end_at: str = None):
+    async def add_to_blacklist(db, user_id: int, reason: str, end_at: str | None = None):
         """Adds a user to the blacklist
 
         Args:
@@ -501,7 +506,14 @@ class Missions:
     FOREIGN KEY(creator_user_id) REFERENCES users(user_id) ON DELETE SET NULL
     """
     @staticmethod
-    async def create(db, channel_id: int, name: str, creator_user_id: int, date: str, ping_role_id: int = None):
+    async def create(
+        db,
+        channel_id: int,
+        name: str,
+        creator_user_id: int,
+        date: str,
+        ping_role_id: int | None = None,
+    ):
         """Creates a new mission
 
         Args:
