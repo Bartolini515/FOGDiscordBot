@@ -8,26 +8,19 @@ import logging
 from logging.handlers import RotatingFileHandler
 import json
 import os
+from pathlib import Path
+
+from configuration import ConfigurationError, ensure_configuration_file, load_configuration
 from db.database import Database
 from db.models import Users
 
-# Create configuration file if it doesn't exist
-if not os.path.exists("configuration.json"):
-    with open("configuration.json", "w", encoding="utf-8") as config:
-        json.dump({
-            "prefix": "!",
-            "owner_id": 0,
-            "guild_id": 0,
-            "permissions": {},
-            "technical_info": {},
-            "channels": {},
-            "roles": {},
-            "ticket_system": {},
-            "message_triggers": [],
-            "messages": {}
-            }, config, indent=4)
-        print("Created default configuration.json, please edit it and restart the bot.")
-        exit()
+CONFIG_PATH = Path("configuration.json")
+CONFIG_TEMPLATE_PATH = Path(__file__).with_name("configuration.example.json")
+
+# Create a safe local configuration without overwriting an existing file.
+if ensure_configuration_file(CONFIG_PATH, CONFIG_TEMPLATE_PATH):
+    print("Created configuration.json from configuration.example.json. Please edit it and restart the bot.")
+    raise SystemExit(1)
 
 # Create .env file if it doesn't exist
 if not os.path.exists(".env"):
@@ -37,20 +30,24 @@ if not os.path.exists(".env"):
         exit()
 
 # Load configuration file
-with open("configuration.json", "r", encoding="utf-8") as config: 
-    data = json.load(config)
-    prefix = data["prefix"]
-    owner_id = data["owner_id"]
-    guild_id = data["guild_id"]
-    permissions = data.get("permissions", {})
-    technical_info = data.get("technical_info", {})
-    channels = data.get("channels", {})
-    roles = data.get("roles", {})
-    ticket_system = data.get("ticket_system", {})
-    message_triggers = data.get("message_triggers", [])
-    messages = data.get("messages", {})
-    leveling_system = data.get("leveling_system", {})
-    honeypot_system = data.get("honeypot_system", {})
+try:
+    data = load_configuration(CONFIG_PATH)
+except ConfigurationError as exc:
+    print(f"Invalid configuration.json: {exc}")
+    raise SystemExit(1) from exc
+
+prefix = data["prefix"]
+owner_id = data["owner_id"]
+guild_id = data["guild_id"]
+permissions = data["permissions"]
+technical_info = data["technical_info"]
+channels = data["channels"]
+roles = data["roles"]
+ticket_system = data["ticket_system"]
+message_triggers = data["message_triggers"]
+messages = data["messages"]
+leveling_system = data["leveling_system"]
+honeypot_system = data["honeypot_system"]
 
 # Load .env variables
 load_dotenv()
