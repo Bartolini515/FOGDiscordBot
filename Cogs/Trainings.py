@@ -1,3 +1,5 @@
+"""Training lifecycle and restart-safe signup components."""
+
 import os
 import discord
 from discord.ext import commands
@@ -41,6 +43,8 @@ class TrainingToggleButton(discord.ui.Button):
 
 
 class TrainingSignupView(discord.ui.View):
+    """Persistent view whose custom ID is derived from the training record."""
+
     def __init__(self, training_id: int):
         super().__init__(timeout=None)
         self.add_item(TrainingToggleButton(training_id=training_id))
@@ -62,9 +66,11 @@ class TrainingsCog(commands.Cog):
         return lock
 
     async def cog_load(self):
+        """Register persistent training views stored in SQLite."""
         await self._restore_training_views()
 
     async def _restore_training_views(self):
+        """Rebind signup callbacks to known Discord training messages."""
         try:
             if not hasattr(self.bot, "db") or self.bot.db is None:
                 return
@@ -304,4 +310,3 @@ class TrainingsCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(TrainingsCog(bot))
-    

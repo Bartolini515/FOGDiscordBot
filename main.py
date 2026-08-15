@@ -1,3 +1,5 @@
+"""Start the single-guild Discord bot and own its process lifecycle."""
+
 import asyncio
 
 import discord
@@ -89,6 +91,8 @@ intents = discord.Intents.all()
 
 # The bot
 class MyBot(commands.Bot):
+    """FOG bot runtime with shared configuration and one SQLite connection."""
+
     def __init__(self, command_prefix, intents, owner_id, guild_id):
         super().__init__(command_prefix=command_prefix, intents=intents, owner_id=owner_id, help_command=None)
         self.guild_id = guild_id
@@ -107,6 +111,7 @@ class MyBot(commands.Bot):
     
     # Load cogs
     async def _load_cogs(self):
+        """Load every Python extension found directly under ``Cogs``."""
         for filename in os.listdir("Cogs"):
             if filename.endswith(".py"):
                 try:
@@ -117,6 +122,7 @@ class MyBot(commands.Bot):
 
     # Update users currently on guild in db
     async def _update_users_on_guild_status(self):
+        """Reconcile stored membership flags with the configured guild."""
         if not hasattr(self, "db") or self.db is None:
             return
         if not self.get_guild(self.guild_id):
@@ -134,6 +140,7 @@ class MyBot(commands.Bot):
         logger.info("Users on_guild status updated.")
         
     async def _save_configuration(self):
+        """Persist mutable in-memory configuration sections to the local JSON file."""
         with open("configuration.json", "r", encoding="utf-8") as config:
             data = json.load(config)
             data["permissions"] = self.permissions
@@ -149,12 +156,14 @@ class MyBot(commands.Bot):
             json.dump(data, config, indent=4)
             
     async def _autosave_task(self):
+        """Persist runtime configuration once per hour until cancellation."""
         while True:
             await asyncio.sleep(3600)  # Save every hour
             await self._save_configuration()
 
     # Before startup
     async def setup_hook(self):
+        """Migrate SQLite, load cogs, and sync commands to the FOG guild."""
         await self.db.connect()
         await self._load_cogs()
         guild = discord.Object(id=self.guild_id)
@@ -164,12 +173,14 @@ class MyBot(commands.Bot):
 
     # On startup
     async def on_ready(self):
+        """Log the connected identity and reconcile current guild members."""
         logger.info(f"We have logged in as {self.user}")
         logger.info(discord.__version__)
         await self._update_users_on_guild_status()
         
     # On shutdown
     async def close(self):
+        """Save configuration and close SQLite before Discord shutdown."""
         # Save changes in configuration file
         await self._save_configuration()
         

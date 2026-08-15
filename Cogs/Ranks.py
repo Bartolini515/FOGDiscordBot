@@ -1,3 +1,5 @@
+"""Translate attendance events into stored and Discord role promotions."""
+
 from discord.ext import commands
 from db.models import Users, Ranks, Attendance
 import logging
@@ -43,9 +45,9 @@ class RanksCog(commands.Cog):
             logger.warning(f"Failed to send DM to user with id {user_id}.")
         
 
-    # TODO: Test this
     @commands.Cog.listener()
     async def on_attendance(self, user_ids: list[int]):
+        """Promote attendees who reached the next seeded mission threshold."""
         if not hasattr(self.bot, "db") or self.bot.db is None:
             logger.warning("Database connection is not available.")
             return

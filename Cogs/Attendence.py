@@ -1,3 +1,5 @@
+"""Mission attendance commands and the event boundary for rank progression."""
+
 import os
 import discord
 from discord.ext import commands
@@ -25,6 +27,7 @@ class AttendanceCog(commands.Cog):
         nieobecni="Lista użytkowników nieobecnych na misji (wzór: @użytkownik @użytkownik ...)."
     )
     async def misja_obecnosc(self, interaction: discord.Interaction, nieobecni: str | None = None):
+        """Record occupied mission slots except named absentees, then emit attendance."""
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)

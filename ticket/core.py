@@ -1,3 +1,5 @@
+"""Shared ticket category contracts, persistence helpers, and Discord actions."""
+
 import json
 import logging
 import re
@@ -19,6 +21,8 @@ logger = logging.getLogger("fogbot")
 
 @dataclass
 class TicketCategory:
+    """Validated configuration needed to create one category of ticket."""
+
     name: str
     description: str
     type_name: str
@@ -33,6 +37,7 @@ TYPE_HANDLERS = {
     "basic_training": BasicTrainingTicketType(),
     "custom": CustomTicketType(),
 }
+"""Normalized ticket type names mapped to shared handler strategies."""
 
 
 def normalize_channel_name(title: str) -> str:
@@ -73,6 +78,7 @@ def build_generic_title(category: TicketCategory, user: discord.abc.User) -> str
 
 
 def get_type_handler(type_name: str):
+    """Return the configured handler, falling back to the custom strategy."""
     return TYPE_HANDLERS.get(type_name, TYPE_HANDLERS["custom"])
 
 

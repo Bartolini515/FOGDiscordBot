@@ -8,7 +8,7 @@ from db.database import Database
 
 @pytest_asyncio.fixture
 async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    """Provide a migrated SQLite database isolated from db/bot.db."""
+    """Provide a migrated SQLite database isolated from production data."""
     db = Database(str(tmp_path / "bot.db"))
     await db.connect()
     try:
