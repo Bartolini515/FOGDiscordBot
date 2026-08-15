@@ -1,15 +1,22 @@
 import logging
+from typing import Any, cast
+
 import discord
 
 
 logger = logging.getLogger("fogbot")
 
 
+def _get_ticket_cog(interaction: discord.Interaction) -> Any:
+    """Resolve the dynamically loaded ticket cog at the discord.py boundary."""
+    return cast(Any, interaction.client).get_cog("TicketsCog")
+
+
 class TicketTitleModal(discord.ui.Modal):
     def __init__(self, category_name: str):
         super().__init__(title="Nowy ticket")
         self.category_name = category_name
-        self.title_input = discord.ui.TextInput(
+        self.title_input: discord.ui.TextInput = discord.ui.TextInput(
             label="Tytuł ticketu",
             placeholder="Wpisz tytuł ticketu",
             max_length=80,
@@ -17,7 +24,7 @@ class TicketTitleModal(discord.ui.Modal):
         self.add_item(self.title_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog("TicketsCog")
+        cog = _get_ticket_cog(interaction)
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
             return
@@ -38,7 +45,7 @@ class TicketCreateButton(discord.ui.Button):
         self.category_name = category_name
 
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog("TicketsCog")
+        cog = _get_ticket_cog(interaction)
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
             return
@@ -64,7 +71,7 @@ class TicketCreateSelect(discord.ui.Select):
             await interaction.response.defer()
             return
 
-        cog = interaction.client.get_cog("TicketsCog")
+        cog = _get_ticket_cog(interaction)
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
             return
@@ -93,7 +100,7 @@ class TicketCloseButton(discord.ui.Button):
         self.channel_id = channel_id
 
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog("TicketsCog")
+        cog = _get_ticket_cog(interaction)
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
             return
@@ -110,7 +117,7 @@ class TicketReopenButton(discord.ui.Button):
         self.channel_id = channel_id
 
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog("TicketsCog")
+        cog = _get_ticket_cog(interaction)
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
             return
@@ -127,7 +134,7 @@ class TicketTranscriptButton(discord.ui.Button):
         self.channel_id = channel_id
 
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog("TicketsCog")
+        cog = _get_ticket_cog(interaction)
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
             return
@@ -144,7 +151,7 @@ class TicketDeleteButton(discord.ui.Button):
         self.channel_id = channel_id
 
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog("TicketsCog")
+        cog = _get_ticket_cog(interaction)
         if cog is None:
             await interaction.response.send_message("Moduł ticketów nie jest dostępny.", ephemeral=True)
             return

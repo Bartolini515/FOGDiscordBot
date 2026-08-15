@@ -1,4 +1,5 @@
 import discord
+from typing import cast
 
 
 class ProposalTicketType:
@@ -40,7 +41,9 @@ class ProposalForwardButton(discord.ui.Button):
             self.proposal_channel_id = bot.channels.get("proposals_channel_id")
 
         async def callback(self, interaction: discord.Interaction):
-            if not interaction.user.guild_permissions.administrator or interaction.channel.permissions_for(interaction.user).manage_messages is False:
+            member = cast(discord.Member, interaction.user)
+            ticket_channel = cast(discord.TextChannel, interaction.channel)
+            if not member.guild_permissions.administrator or ticket_channel.permissions_for(member).manage_messages is False:
                 await interaction.response.send_message("Nie masz uprawnień do przekazywania propozycji.", ephemeral=True)
                 return
 

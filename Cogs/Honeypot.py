@@ -110,7 +110,7 @@ class HoneypotCog(commands.Cog):
     async def honeypot_trap_add(self, interaction: discord.Interaction):
         channel = interaction.channel
         if channel.id in self.tracked_channels:
-            await interaction.response.send_message(f"Ten kanał jest już honeypot trapem.", ephemeral=True)
+            await interaction.response.send_message("Ten kanał jest już honeypot trapem.", ephemeral=True)
             return
         
         self.tracked_channels.add(channel.id)
@@ -134,7 +134,7 @@ class HoneypotCog(commands.Cog):
     async def honeypot_trap_delete(self, interaction: discord.Interaction):
         channel = interaction.channel
         if channel.id not in self.tracked_channels:
-            await interaction.response.send_message(f"Ten kanał nie jest honeypot trapem.", ephemeral=True)
+            await interaction.response.send_message("Ten kanał nie jest honeypot trapem.", ephemeral=True)
             return
         
         self.tracked_channels.remove(channel.id)

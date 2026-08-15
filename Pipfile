@@ -10,6 +10,16 @@ aiosqlite = "*"
 yoyo-migrations = "*"
 
 [dev-packages]
+pytest = "*"
+pytest-asyncio = "*"
+ruff = "*"
+mypy = "*"
+
+[scripts]
+test = "pytest"
+lint = "ruff check ."
+typecheck = "mypy"
+check = "python scripts/check.py"
 
 [requires]
 python_version = "3.12"

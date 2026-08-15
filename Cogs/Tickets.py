@@ -1,6 +1,5 @@
 import os
 import io
-import json
 import logging
 import html
 import discord

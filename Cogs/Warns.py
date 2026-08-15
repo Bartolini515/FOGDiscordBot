@@ -1,12 +1,9 @@
 import os
 import discord
-import os
-import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
 from db.models import Warns, Users
-from datetime import datetime
 
 
 logger = logging.getLogger("fogbot")

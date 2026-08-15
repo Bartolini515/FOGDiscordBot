@@ -177,7 +177,6 @@ class SignOutButton(discord.ui.Button):
             return
         mission_id = rows[0] if rows else None
         mission_name = rows[1] if rows else None
-        creator_user_id = rows[4] if rows else None
         date = rows[5] if rows else None
         
         rows = await Slots.get_by_mission_and_user(interaction.client.db, mission_id, interaction.user.id)

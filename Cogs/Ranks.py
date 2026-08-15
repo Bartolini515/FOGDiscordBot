@@ -1,6 +1,4 @@
-import discord
 from discord.ext import commands
-from discord import app_commands
 from db.models import Users, Ranks, Attendance
 import logging
 
