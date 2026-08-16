@@ -140,13 +140,13 @@ class Utilities(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
-    async def send_message(self, interaction: discord.Interaction, kanal: discord.TextChannel, tresc: str):
+    async def send_message(self, interaction: discord.Interaction, tresc: str):
         try:
-            await kanal.send(tresc)
-            await interaction.response.send_message(f"Wiadomość została wysłana na {kanal.mention}.", ephemeral=True)
+            await interaction.channel.send(tresc)
+            await interaction.response.send_message(f"Wiadomość została wysłana na {interaction.channel.mention}.", ephemeral=True)
         except Exception as e:
-            logger.error(f"Nie udało się wysłać wiadomości na {kanal.name}: {e}")
-            await interaction.response.send_message(f"Nie udało się wysłać wiadomości na {kanal.mention}.", ephemeral=True)
+            logger.error(f"Nie udało się wysłać wiadomości na {interaction.channel.name}: {e}")
+            await interaction.response.send_message(f"Nie udało się wysłać wiadomości na {interaction.channel.mention}.", ephemeral=True)
 
     
     
@@ -364,7 +364,6 @@ class Utilities(commands.Cog):
     
     
     # =========== Ticket Types section ===========
-    # TODO: Test this
     #/ticket_categories_list
     @app_commands.command(
         name="ticket_categories_list",
@@ -394,7 +393,6 @@ class Utilities(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
     
-    # TODO: Test this
     #/ticket_categories_add
     @app_commands.command(
         name="ticket_categories_add",
@@ -421,7 +419,6 @@ class Utilities(commands.Cog):
 
         await interaction.response.send_message(f"Kategoria ticketów '{name}' została dodana.", ephemeral=True)
     
-    # TODO: Test this
     #/ticket_categories_remove
     @app_commands.command(
         name="ticket_categories_remove",
@@ -461,7 +458,6 @@ class Utilities(commands.Cog):
         
     # =========== Trigger Messages section ===========
     # /triggers_list
-    # TODO: Test this
     @app_commands.command(
         name="triggers_list",
         description="Wyświetl zdefiniowane wiadomości wyzwalające",
@@ -517,7 +513,6 @@ class Utilities(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
         
     # /triggers_add
-    # TODO: Test this
     @app_commands.command(
         name="triggers_add",
         description="Dodaj nową wiadomość wyzwalającą",
@@ -554,7 +549,6 @@ class Utilities(commands.Cog):
         await interaction.response.send_message(f"Nowa wiadomość wyzwalająca została dodana: {keyword}", ephemeral=True)
         
     # /triggers_edit
-    # TODO: Test this
     @app_commands.command(
         name="triggers_edit",
         description="Edytuj istniejącą wiadomość wyzwalającą",
@@ -598,7 +592,6 @@ class Utilities(commands.Cog):
         await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' nie została znaleziona.", ephemeral=True)
         
     # /triggers_remove
-    # TODO: Test this
     @app_commands.command(
         name="triggers_remove",
         description="Usuń istniejącą wiadomość wyzwalającą",
