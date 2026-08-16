@@ -61,7 +61,7 @@ class RanksCog(commands.Cog):
             rows = await Attendance.get_by_user(self.bot.db, user_id)
             all_time_missions = rows[2]
             
-            max_missions = await Ranks.get_max_rank(self.bot.db)[3]
+            max_missions = (await Ranks.get_max_rank(self.bot.db))[3]
             
             if all_time_missions >= max_missions:
                 continue
