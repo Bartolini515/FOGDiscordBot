@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+import aiosqlite
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -6,6 +8,46 @@ from db.models import Attendance, Users, Ranks
 import logging
 
 logger = logging.getLogger("fogbot")
+
+
+async def _is_bot_owner(interaction: discord.Interaction) -> bool:
+    return interaction.user.id == getattr(interaction.client, "owner_id", None)
+
+
+def _format_sql_result(
+    description: Sequence[tuple] | None,
+    rows: Sequence[tuple],
+    rowcount: int,
+) -> str:
+    if description:
+        columns = " | ".join(str(column[0]) for column in description)
+        if not rows:
+            return f"Columns: {columns}\nNo rows returned."
+        return "\n".join([f"Columns: {columns}", *(repr(tuple(row)) for row in rows)])
+    if rowcount >= 0:
+        return f"Statement executed successfully. Rows affected: {rowcount}."
+    return "Statement executed successfully."
+
+
+def _split_sql_response(content: str, limit: int = 2_000) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for line in content.splitlines() or [""]:
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        candidate = line if not current else f"{current}\n{line}"
+        if len(candidate) <= limit:
+            current = candidate
+        else:
+            chunks.append(current)
+            current = line
+    if current or not chunks:
+        chunks.append(current)
+    return chunks
 
 
 class Utilities(commands.Cog):
@@ -134,7 +176,6 @@ class Utilities(commands.Cog):
         description="Wyślij wiadomość na określony kanał",
     )
     @app_commands.describe(
-        kanal="Kanał do którego chcesz wysłać wiadomość",
         tresc="Treść wiadomości do wysłania"
     )
     @app_commands.guild_only()
@@ -147,6 +188,36 @@ class Utilities(commands.Cog):
         except Exception as e:
             logger.error(f"Nie udało się wysłać wiadomości na {interaction.channel.name}: {e}")
             await interaction.response.send_message(f"Nie udało się wysłać wiadomości na {interaction.channel.mention}.", ephemeral=True)
+
+    #/sql_query
+    @app_commands.command(
+        name="sql_query",
+        description="Wykonaj jedno zapytanie SQL (tylko właściciel bota)",
+    )
+    @app_commands.describe(
+        query="Jedno zapytanie SQL do wykonania"
+    )
+    @app_commands.check(_is_bot_owner)
+    async def sql_query(self, interaction: discord.Interaction, query: str) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        connection = getattr(self.bot.db, "conn", None)
+        if connection is None:
+            result = "Baza danych jest niedostępna."
+        else:
+            try:
+                cursor = await connection.execute(query)
+                rows = await cursor.fetchall() if cursor.description else []
+                await connection.commit()
+                result = _format_sql_result(cursor.description, rows, cursor.rowcount)
+            except aiosqlite.Error as error:
+                result = f"Błąd SQL: {error}"
+
+        for chunk in _split_sql_response(result):
+            await interaction.followup.send(
+                chunk,
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
 
     
     

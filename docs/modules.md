@@ -111,6 +111,7 @@ Ticket channel creation and management buttons use the category-specific handler
 | `/change_user_missions` | Administrator | Changes a user's cumulative mission attendance. |
 | `/assign_categories_roles` | Administrator | Adds configured category roles to a member. |
 | `/send_message` | Administrator | Sends administrator-supplied content through the bot. |
+| `/sql_query` | Bot owner | Executes one arbitrary SQL statement and returns its result ephemerally. |
 | `/permissions_list` | Administrator | Lists configured permission categories. |
 | `/permissions_add` | Administrator | Adds a member or role ID to a permission category. |
 | `/permissions_remove` | Administrator | Removes a member or role ID from a permission category. |
