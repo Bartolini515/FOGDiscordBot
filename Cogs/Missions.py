@@ -814,6 +814,10 @@ class MissionsCog(commands.Cog):
         creator_user_id = rows[4]
         
         if creator_user_id != interaction.user.id and not interaction.user.guild_permissions.administrator: # Validation of permissions
+            logger.info(
+                        "User %s (%s) attempted to sign in another user %s (%s) for without permission.",
+                        interaction.user, interaction.user.id, uzytkownik, uzytkownik.id,
+                        )
             await interaction.response.send_message("Tylko twórca misji może wpisywać użytkowników do zapisów.", ephemeral=True)
             return
 
@@ -878,6 +882,10 @@ class MissionsCog(commands.Cog):
                 except Exception:
                     logger.exception("Error while rebuilding signup message after manual assignment")
 
+        logger.info(
+                    "User %s (%s) signed in another user %s (%s) for slot %s.",
+                    interaction.user, interaction.user.id, uzytkownik, uzytkownik.id, selected_slot_name
+                    )
         await interaction.response.send_message(
             f"Użytkownik {uzytkownik.mention} został wpisany do drużyny {squad_name} na slot {selected_slot_name}.",
             ephemeral=True,
