@@ -74,6 +74,7 @@ All files in `Cogs/` are discovered and loaded by `main.py`. Commands are synchr
 | `/misja_zapisy_stworz` | Mission creator or administrator | Creates a persistent signup message, squad, and slots. |
 | `/misja_zapisy_usun` | Mission creator or administrator | Removes one signup message with its squad and slots. |
 | `/misja_zapisy_wypisz` | Mission creator or administrator | Removes a selected member from the mission roster. |
+| `/misja_zapisy_wpisz` | Mission creator or administrator | Manually assigns a member to a free named slot using a signup message ID. |
 
 See [Mission domain](domain/missions.md) for the complete state transitions and 12-hour self-service sign-out rule.
 
