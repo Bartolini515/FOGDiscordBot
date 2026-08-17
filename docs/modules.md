@@ -32,7 +32,7 @@ All files in `Cogs/` are discovered and loaded by `main.py`. Commands are synchr
 | Command | Access | Effect |
 | --- | --- | --- |
 | `/misja_obecnosc` | Mission creator or administrator | Derives attendees from slots, records attendance, emits the rank event, and posts a report. |
-| `/obecnosc_sprawdz` | Guild command | Shows attendance for a selected member. |
+| `/obecnosc_gracz` | Guild command | Shows attendance for a selected member. |
 | `/obecnosc_ranking` | Guild command | Shows the attendance leaderboard. |
 
 ### `Blacklist.py`
@@ -60,8 +60,8 @@ All files in `Cogs/` are discovered and loaded by `main.py`. Commands are synchr
 
 | Command | Access | Effect |
 | --- | --- | --- |
-| `/level` | Guild command | Shows a member's level and experience. |
-| `/leaderboard` | Guild command | Shows the experience leaderboard. |
+| `/level_check` | Guild command | Shows a member's level and experience. |
+| `/level_leaderboard` | Guild command | Shows the experience leaderboard. |
 | `/level_notifications` | Guild command | Enables or disables the invoker's level notifications. |
 
 ### `Missions.py`
