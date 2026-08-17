@@ -111,15 +111,15 @@ class Level(commands.Cog):
         new_exp = min(current_exp + gained_exp, MAXEXP)
         self.users_experience_cache[user_id] = new_exp
         
-    # /level
+    # /level_check
     @app_commands.command(
-        name="level",
+        name="level_check",
         description="Sprawdź swój poziom i doświadczenie.",
         extras={"category": "Poziomy"}
     )
     @app_commands.guild_only()
     @app_commands.describe(uzytkownik="Użytkownik, którego poziom chcesz sprawdzić (domyślnie ty).")
-    async def level(self, interaction: discord.Interaction, uzytkownik: discord.User = None):
+    async def level_check(self, interaction: discord.Interaction, uzytkownik: discord.User = None):
         user_id = uzytkownik.id if uzytkownik else interaction.user.id
         current_exp = await self._get_cached_experience(user_id)
         current_level = self._calculate_level(current_exp)
@@ -147,15 +147,15 @@ class Level(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
         
-    # /leaderboard
+    # /level_leaderboard
     @app_commands.command(
-        name="leaderboard",
+        name="level_leaderboard",
         description="Pokaż ranking poziomów użytkowników.",
         extras={"category": "Poziomy"}
     )
     @app_commands.guild_only()
     @app_commands.describe(limit="Liczba użytkowników do wyświetlenia w rankingu (domyślnie 10).")
-    async def leaderboard(self, interaction: discord.Interaction, limit: int = 10):
+    async def level_leaderboard(self, interaction: discord.Interaction, limit: int = 10):
         leaderboard = await Users.get_leaderboard(self.bot.db, limit)
         embed = discord.Embed(
             title="Ranking poziomów użytkowników",
