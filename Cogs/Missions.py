@@ -790,40 +790,106 @@ class MissionsCog(commands.Cog):
         logger.info(f"User {interaction.user} ({interaction.user.id}) removed user {uzytkownik} ({uzytkownik.id}) from mission {mission_name} in channel {interaction.channel.id}")
         await interaction.followup.send(f"Użytkownik {uzytkownik.mention} został wypisany z misji {mission_name}.", ephemeral=True)
 
-    # # /misja_zapisy_wpisz
-    # @app_commands.command(
-    #     name="misja_zapisy_wpisz",
-    #     description="Wpisuje użytkownika do misji.",
-    #     extras={"category": "Misje"},
-    # )
-    # @app_commands.guild_only()
-    # @app_commands.describe(
-    #     uzytkownik="Użytkownik do wpisania",
+    # /misja_zapisy_wpisz
+    @app_commands.command(
+        name="misja_zapisy_wpisz",
+        description="Wpisuje użytkownika do misji.",
+        extras={"category": "Misje"},
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(
+        uzytkownik="Użytkownik do wpisania",
+        druzyna_id="ID wiadomości z drużyną",
+        slot="Nazwa slotu",
+    )
+    async def misja_zapisy_wpisz(self, interaction: discord.Interaction, uzytkownik: discord.Member, druzyna_id: str, slot: str):
+        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+            return
         
-    # )
-    # async def misja_zapisy_wpisz(self, interaction: discord.Interaction, uzytkownik: discord.Member, druzyna: str, slot: str):
-    #     if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
-    #         return
+        rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
+        if not rows: # Validation of mission existence
+            await interaction.response.send_message("Ta komenda może być użyta tylko w kanale misji.", ephemeral=True)
+            return
+        mission_id = rows[0]
+        creator_user_id = rows[4]
         
-    #     rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
-    #     if not rows: # Validation of mission existence
-    #         await interaction.response.send_message("Ta komenda może być użyta tylko w kanale misji.", ephemeral=True)
-    #         return
-    #     mission_id = rows[0]
-    #     creator_user_id = rows[4]
-        
-    #     if creator_user_id != interaction.user.id and not interaction.user.guild_permissions.administrator: # Validation of permissions
-    #         await interaction.response.send_message("Tylko twórca misji może wpisywać użytkowników do zapisów.", ephemeral=True)
-    #         return
-        
-    #     # Get the message_id for the specified team
-    #     rows = await Squads.get_by_name(self.bot.db, mission_id, druzyna)
-    #     if not rows:
-    #         await interaction.response.send_message(f"Nie znaleziono drużyny o podanej nazwie {druzyna}.", ephemeral=True)
-    #         return
-    #     message_id = rows[0]
-        
-        
+        if creator_user_id != interaction.user.id and not interaction.user.guild_permissions.administrator: # Validation of permissions
+            logger.info(
+                        "User %s (%s) attempted to sign in another user %s (%s) for without permission.",
+                        interaction.user, interaction.user.id, uzytkownik, uzytkownik.id,
+                        )
+            await interaction.response.send_message("Tylko twórca misji może wpisywać użytkowników do zapisów.", ephemeral=True)
+            return
+
+        try:
+            message_id = int(druzyna_id)
+        except (TypeError, ValueError):
+            await interaction.response.send_message("ID wiadomości drużyny musi być liczbą.", ephemeral=True)
+            return
+
+        # The message ID is the squad primary key; also ensure it belongs to this mission.
+        squad_rows = await Squads.get(self.bot.db, message_id)
+        if not squad_rows or squad_rows[1] != mission_id:
+            await interaction.response.send_message(
+                f"Nie znaleziono drużyny dla wiadomości o ID {druzyna_id}.",
+                ephemeral=True,
+            )
+            return
+        squad_name = squad_rows[2]
+        requested_slot = slot.strip()
+        if not requested_slot:
+            await interaction.response.send_message("Nazwa slotu nie może być pusta.", ephemeral=True)
+            return
+
+        previous_message_id: int | None = None
+        selected_slot_name: str | None = None
+        async with self._get_mission_lock(mission_id):
+            previous_rows = await Slots.get_by_mission_and_user(self.bot.db, mission_id, uzytkownik.id)
+            if previous_rows:
+                previous_message_id = int(previous_rows[1])
+
+            slot_rows = await Slots.get(self.bot.db, message_id)
+            selected_slot = next(
+                (
+                    row
+                    for row in slot_rows
+                    if row[2] is None and row[1].casefold() == requested_slot.casefold()
+                ),
+                None,
+            )
+            if selected_slot is None:
+                await interaction.response.send_message(
+                    f"Nie znaleziono wolnego slotu {requested_slot} w drużynie {squad_name}.",
+                    ephemeral=True,
+                )
+                return
+
+            selected_slot_name = selected_slot[1]
+            await Slots.assign_user_to_slot(self.bot.db, message_id, str(selected_slot[0]), uzytkownik.id)
+
+            changed_message_ids = [message_id]
+            if previous_message_id is not None and previous_message_id != message_id:
+                changed_message_ids.append(previous_message_id)
+            for changed_message_id in changed_message_ids:
+                try:
+                    await self._rebuild_signup_message(
+                        channel=interaction.channel,
+                        message_id=changed_message_id,
+                        mission_id=mission_id,
+                    )
+                except (discord.NotFound, discord.Forbidden):
+                    logger.warning("Signup message %s could not be refreshed", changed_message_id)
+                except Exception:
+                    logger.exception("Error while rebuilding signup message after manual assignment")
+
+        logger.info(
+                    "User %s (%s) signed in another user %s (%s) for slot %s.",
+                    interaction.user, interaction.user.id, uzytkownik, uzytkownik.id, selected_slot_name
+                    )
+        await interaction.response.send_message(
+            f"Użytkownik {uzytkownik.mention} został wpisany do drużyny {squad_name} na slot {selected_slot_name}.",
+            ephemeral=True,
+        )
 
 async def setup(bot:commands.Bot):
     await bot.add_cog(MissionsCog(bot))

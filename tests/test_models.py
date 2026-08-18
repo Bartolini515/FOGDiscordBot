@@ -1,5 +1,31 @@
 from db.database import Database
 from db.models import Attendance, Missions, Ranks, Slots, Squads, TicketTypes, Tickets, Users, Warns
+from Cogs.Missions import MissionsCog
+
+
+class _FakeResponse:
+    def __init__(self):
+        self.messages = []
+
+    async def send_message(self, content: str, **kwargs):
+        self.messages.append((content, kwargs))
+
+
+class _FakeMessage:
+    def __init__(self):
+        self.edits = []
+
+    async def edit(self, **kwargs):
+        self.edits.append(kwargs)
+
+
+class _FakeChannel:
+    def __init__(self, channel_id: int, messages: dict[int, _FakeMessage]):
+        self.id = channel_id
+        self.messages = messages
+
+    def get_partial_message(self, message_id: int):
+        return self.messages.setdefault(message_id, _FakeMessage())
 
 
 async def test_user_moves_between_slots_within_one_mission(database: Database):
@@ -26,6 +52,43 @@ async def test_user_moves_between_slots_within_one_mission(database: Database):
 
     await Slots.remove_user_from_slot(database, mission_id, 1002)
     assert all(row[3] is None for row in await Slots.get_by_mission(database, mission_id))
+
+
+async def test_mission_signup_write_assigns_user_to_message_slot(database: Database):
+    await Users.add_user(database, 1401, "creator")
+    await Users.add_user(database, 1402, "member")
+    await Missions.create(database, 2401, "Operation East", 1401, "2030-04-05 20:00:00")
+    mission_id = (await Missions.get_channel(database, 2401))[0]
+    await Squads.create(database, mission_id, 3401, "Alpha")
+    await Squads.create(database, mission_id, 3402, "Bravo")
+    await Slots.create(database, mission_id, 3401, ["Leader", "Medic"])
+    await Slots.create(database, mission_id, 3402, ["Leader"])
+
+    bravo_slot_id = (await Slots.get(database, 3402))[0][0]
+    await Slots.assign_user_to_slot(database, 3402, str(bravo_slot_id), 1402)
+
+    from types import SimpleNamespace
+
+    messages = {3401: _FakeMessage(), 3402: _FakeMessage()}
+    interaction = SimpleNamespace(
+        channel=_FakeChannel(2401, messages),
+        user=SimpleNamespace(id=1401, guild_permissions=SimpleNamespace(administrator=False)),
+        response=_FakeResponse(),
+    )
+    target = SimpleNamespace(id=1402, mention="<@1402>")
+    cog = MissionsCog(SimpleNamespace(db=database))
+
+    await MissionsCog.misja_zapisy_wpisz.callback(cog, interaction, target, "3401", "leader")
+
+    alpha_slots = await Slots.get(database, 3401)
+    bravo_slots = await Slots.get(database, 3402)
+    assert alpha_slots[0][2] == 1402
+    assert bravo_slots[0][2] is None
+    assert len(messages[3401].edits) == 1
+    assert len(messages[3402].edits) == 1
+    assert interaction.response.messages == [
+        ("Użytkownik <@1402> został wpisany do drużyny Alpha na slot Leader.", {"ephemeral": True})
+    ]
 
 
 async def test_deleting_mission_cascades_to_squads_and_slots(database: Database):

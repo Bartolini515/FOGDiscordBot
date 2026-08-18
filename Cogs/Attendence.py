@@ -101,15 +101,15 @@ class AttendanceCog(commands.Cog):
         logger.info(f"Attendance for mission {mission_name} ({mission_date}) recorded by {interaction.user.name}.")
         
         
-    #/obecnosc_sprawdz
+    #/obecnosc_gracz
     @app_commands.command(
-        name="obecnosc_sprawdz",
+        name="obecnosc_gracz",
         description="Sprawdza statystykę obecności użytkownika w misjach.",
         extras={"category": "Obecność"},
     )
     @app_commands.guild_only()
     @app_commands.describe(uzytkownik="Użytkownik, którego obecność chcesz sprawdzić.")
-    async def obecnosc_sprawdz(self, interaction: discord.Interaction, uzytkownik: discord.User = None):
+    async def obecnosc_gracz(self, interaction: discord.Interaction, uzytkownik: discord.User = None):
         if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
             return
         user_id = uzytkownik.id if uzytkownik else interaction.user.id
