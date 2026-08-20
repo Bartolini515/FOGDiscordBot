@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 from os import getenv
 import logging
+from services.members import is_target_guild
+from services.triggers import matching_trigger_responses
 
 logger = logging.getLogger("fogbot")
 debug = getenv("DEBUG", "False") == "True"
@@ -14,9 +16,7 @@ class Triggers(commands.Cog):
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.guild is None:
-            return
-        if message.guild.id != self.bot.guild_id:
+        if not is_target_guild(message.guild, self.bot.guild_id):
             return
         if message.author.bot:
             return
@@ -51,68 +51,14 @@ class Triggers(commands.Cog):
         if not self.bot.message_triggers:
             return
 
-        for trigger in self.bot.message_triggers: # Iterate through each trigger
-            if not trigger.get("enabled", False): # Skip if trigger is not enabled
-                if debug:
-                    logger.debug(f"Trigger '{trigger.get('keyword', '')}' is not enabled, skipping.")
-                continue
-            
-            if trigger.get("case_sensitive", False): # Check case sensitivity
-                if debug:
-                    logger.debug(f"Trigger '{trigger.get('keyword', '')}' is case sensitive.")
-                keyword = trigger.get("keyword", "")
-            else:
-                keyword = trigger.get("keyword", "").lower()
-            
-            if keyword == "": # Skip if keyword is empty
-                if debug:
-                    logger.debug("Trigger keyword is empty, skipping.")
-                continue
-            
-            # if len(trigger.get("channels", [])) > 0 and message.channel.id not in trigger.get("channels", []): # Check channel restrictions
-            #     if debug:
-            #         logger.debug(f"Trigger '{keyword}' is not allowed in this channel, skipping.")
-            #     continue
-            
-            # if len(trigger.get("roles", [])) > 0: # Check role restrictions
-            #     if debug:
-            #         logger.debug(f"Trigger '{keyword}' has role restrictions, checking user roles.")
-            #     has_role = False
-            #     for role in message.author.roles:
-            #         if role.id in trigger.get("roles", []):
-            #             has_role = True
-            #             break
-            #     if not has_role:
-            #         continue
-            
-            content_to_check = message.content if trigger.get("case_sensitive", False) else message.content.lower() # Prepare content for checking based on case sensitivity
-            if debug:
-                logger.debug(f"Content to check for trigger '{keyword}': {content_to_check}")
-            matched = False
-            if trigger.get("whole_word", False): # Check the word based on whole word match setting
-                if debug:
-                    logger.debug(f"Trigger '{keyword}' requires whole word match.")
-                words = content_to_check.split()
-                if keyword in words:
-                    matched = True
-            else:
-                if content_to_check.find(keyword) != -1:
-                    matched = True
-                    
-            if matched:
-                cooldown_seconds = trigger.get("cooldown_seconds", 0)
-                if cooldown_seconds > 0: # Check cooldown
-                    last_triggered_time = self.last_triggered_times.get(keyword, 0)
-                    current_time = discord.utils.utcnow().timestamp()
-                    if current_time - last_triggered_time < cooldown_seconds:
-                        if debug:
-                            logger.debug(f"Trigger '{keyword}' is on cooldown, skipping.")
-                        continue
-                    self.last_triggered_times[keyword] = current_time
-                    
-                response = trigger.get("response", "")
-                if response != "":
-                    await message.channel.send(response)
+        responses = matching_trigger_responses(
+            self.bot.message_triggers,
+            message.content,
+            self.last_triggered_times,
+            now=discord.utils.utcnow().timestamp(),
+        )
+        for response in responses:
+            await message.channel.send(response)
                 
 
 async def setup(bot:commands.Bot):

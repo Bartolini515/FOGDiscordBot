@@ -5,13 +5,20 @@ from db.models.users import Users
 import logging
 import random
 from discord.ext import tasks
+from services.leveling import (
+    MAXEXP,
+    MAXEXPGAIN,
+    MAXLVL,
+    MINEXPGAIN,
+    calculate_experience,
+    calculate_level,
+    check_level_up,
+    next_experience,
+)
+from services.members import is_target_guild
+from utils.database import has_database
 
 logger = logging.getLogger("fogbot")
-
-MAXEXP = 55100
-MAXLVL = 100
-MAXEXPGAIN = 25
-MINEXPGAIN = 10
 
 class Level(commands.Cog):
     """User leveling system."""
@@ -21,9 +28,9 @@ class Level(commands.Cog):
         self.cooldown_cache = {}
         self._notifications_off_users_cache = {user: 1 for user in self.bot.leveling_system.get("notifications_off_users", [])}
         
-    _calculate_experience = staticmethod(lambda level: int(5 * (level ** 2) + (50 * level) + 100))
-    _calculate_level = staticmethod(lambda experience: int((-50 + (20 * experience + 500)** 0.5) / 10))
-    _check_level_up = staticmethod(lambda current_exp, new_exp: Level._calculate_level(new_exp) > Level._calculate_level(current_exp))
+    _calculate_experience = staticmethod(calculate_experience)
+    _calculate_level = staticmethod(calculate_level)
+    _check_level_up = staticmethod(check_level_up)
 
     async def _get_cached_experience(self, user_id: int) -> int:
         if user_id in self.users_experience_cache:
@@ -50,7 +57,7 @@ class Level(commands.Cog):
     # Periodically flush cached experience to the database
     @tasks.loop(minutes=1)
     async def _flush_experience_cache(self) -> None:
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         if not self.users_experience_cache:
             return
@@ -91,9 +98,7 @@ class Level(commands.Cog):
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.guild is None:
-            return
-        if message.guild.id != self.bot.guild_id:
+        if not is_target_guild(message.guild, self.bot.guild_id):
             return
         if message.author.bot:
             return
@@ -108,7 +113,7 @@ class Level(commands.Cog):
         
         current_exp = await self._get_cached_experience(user_id)
         gained_exp = random.randint(MINEXPGAIN, MAXEXPGAIN)
-        new_exp = min(current_exp + gained_exp, MAXEXP)
+        new_exp = next_experience(current_exp, gained_exp, MAXEXP)
         self.users_experience_cache[user_id] = new_exp
         
     # /level_check
