@@ -6,6 +6,8 @@ FogDiscordBot is a single-process `discord.py` application for one FOG Discord g
 
 - `main.py` owns process startup, bot lifecycle, cog discovery, guild command synchronization, configuration autosave, and shutdown.
 - `configuration.py` creates and validates local configuration.
+- `utils/` contains stateless helpers shared across cogs and services.
+- `services/` contains typed, explicit-dependency workflow functions grouped by domain.
 - `Cogs/` contains Discord slash commands, listeners, views, and background loops.
 - `db/database.py` owns the SQLite connection and yoyo migration step.
 - `db/models/` contains asynchronous, SQL-oriented data access classes, with one model class per module.
@@ -36,6 +38,8 @@ flowchart TD
 ```
 
 `main.py` uses all Discord intents and copies the application command tree into `guild_id`. This deliberately targets the single FOG guild instead of globally publishing commands. Cog modules are discovered from the filesystem and loaded as extensions, so a new cog becomes part of startup automatically when it provides the normal `setup(bot)` entry point.
+
+Cog classes remain the Discord interaction boundary: decorators, persistent views, locks, and component registration stay in `Cogs/`. Stateless cross-cutting operations live in `utils/`, while multi-step workflows live in `services/` and receive their dependencies explicitly. This separation changes code organization only; command names, responses, permissions, model calls, and side-effect ordering remain the same.
 
 The `on_ready` reconciliation marks every database user as off-guild, then inserts or updates the current non-bot guild members as present. It preserves historical users for attendance, warning, and mission references.
 

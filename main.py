@@ -6,15 +6,13 @@ import discord
 from datetime import datetime
 from discord.ext import commands
 from dotenv import load_dotenv
-import logging
-from logging.handlers import RotatingFileHandler
-import json
 import os
 from pathlib import Path
 
 from configuration import ConfigurationError, ensure_configuration_file, load_configuration
 from db.database import Database
 from db.models.users import Users
+from services.runtime import collect_non_bot_members, configure_logging, load_cogs, save_runtime_configuration
 
 CONFIG_PATH = Path("configuration.json")
 CONFIG_TEMPLATE_PATH = Path(__file__).with_name("configuration.example.json")
@@ -58,32 +56,7 @@ debug = os.getenv("DEBUG") == "True"
 
 
 # Logging
-os.makedirs("logs", exist_ok=True)
-
-logger = logging.getLogger("fogbot")
-logger.setLevel(logging.DEBUG if debug else logging.INFO)
-
-formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
-
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.DEBUG if debug else logging.INFO)
-stream_handler.setFormatter(formatter)
-
-file_handler = RotatingFileHandler("logs/bot.log", maxBytes=5*1024*1024, backupCount=5, encoding="utf-8")
-file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
-file_handler.setFormatter(formatter)
-
-# Avoid duplicate handlers if reloading
-if not logger.handlers:
-    logger.addHandler(stream_handler)
-    logger.addHandler(file_handler)
-
-# Also route discord.py logs to same handlers
-discord_logger = logging.getLogger("discord")
-discord_logger.setLevel(logging.DEBUG if debug else logging.INFO)
-if not discord_logger.handlers:
-    discord_logger.addHandler(stream_handler)
-    discord_logger.addHandler(file_handler)
+logger = configure_logging(debug)
 
 # Intents
 intents = discord.Intents.all()
@@ -112,48 +85,39 @@ class MyBot(commands.Bot):
     # Load cogs
     async def _load_cogs(self):
         """Load every Python extension found directly under ``Cogs``."""
-        for filename in os.listdir("Cogs"):
-            if filename.endswith(".py"):
-                try:
-                    await self.load_extension(f"Cogs.{filename[:-3]}")
-                    logger.info(f"Loaded extension: Cogs.{filename[:-3]}")
-                except Exception:
-                    logger.exception(f"Failed to load extension Cogs.{filename[:-3]}")
+        await load_cogs(self, logger)
 
     # Update users currently on guild in db
     async def _update_users_on_guild_status(self):
         """Reconcile stored membership flags with the configured guild."""
         if not hasattr(self, "db") or self.db is None:
             return
-        if not self.get_guild(self.guild_id):
+        guild = self.get_guild(self.guild_id)
+        if not guild:
             return
         logger.info("Updating users on_guild status in database...")
-        members = []
-        for member in self.get_guild(self.guild_id).members:
-            if member.bot:
-                continue
-            members.append((member.id, member.name))
+        members = collect_non_bot_members(guild)
         if debug:
-            logger.debug(self.get_guild(self.guild_id))
+            logger.debug(guild)
             logger.debug(f"Guild members: {members}")
         await Users.update_users_on_startup(self.db, members)
         logger.info("Users on_guild status updated.")
         
     async def _save_configuration(self):
         """Persist mutable in-memory configuration sections to the local JSON file."""
-        with open("configuration.json", "r", encoding="utf-8") as config:
-            data = json.load(config)
-            data["permissions"] = self.permissions
-            data["technical_info"]["current_run_date"] = self.technical_info["current_run_date"]
-            data["channels"] = self.channels
-            data["ticket_system"] = self.ticket_system
-            data["message_triggers"] = self.message_triggers
-            data["messages"] = self.messages
-            data["leveling_system"] = self.leveling_system
-            data["honeypot_system"] = self.honeypot_system
-            
-        with open("configuration.json", "w", encoding="utf-8") as config:
-            json.dump(data, config, indent=4)
+        save_runtime_configuration(
+            Path("configuration.json"),
+            {
+                "permissions": self.permissions,
+                "technical_info": self.technical_info,
+                "channels": self.channels,
+                "ticket_system": self.ticket_system,
+                "message_triggers": self.message_triggers,
+                "messages": self.messages,
+                "leveling_system": self.leveling_system,
+                "honeypot_system": self.honeypot_system,
+            },
+        )
             
     async def _autosave_task(self):
         """Persist runtime configuration once per hour until cancellation."""
