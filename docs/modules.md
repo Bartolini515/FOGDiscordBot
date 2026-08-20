@@ -25,6 +25,26 @@ All files in `Cogs/` are discovered and loaded by `main.py`. Commands are synchr
 | `Utilities.py` | Diagnostics, moderation helpers, role assignment, outbound messages, and configuration administration. | `technical_info`, permissions/channels/roles/ticket categories/triggers; several models. |
 | `Warns.py` | Administrative warning writes and warning reports. | `Users`, `Warns`. |
 
+## Shared service boundaries
+
+Cog classes remain the Discord interaction boundary: decorators, persistent views, locks, scheduled tasks, and component registration stay in `Cogs/`. The following modules hold reusable, explicitly dependent transformations and decisions:
+
+| Module | Responsibility |
+| --- | --- |
+| `utils/database.py` | Checks whether a bot exposes the existing database object, without inspecting its connection. |
+| `utils/discord.py` | Parses Discord-shaped mentions without performing I/O. |
+| `utils/text.py` | Splits responses at Discord's message limit. |
+| `utils/dates.py` | Normalizes command dates to the existing SQLite string format. |
+| `services/runtime.py` | Logging setup, non-bot member collection, configuration persistence, and cog discovery. |
+| `services/members.py`, `services/moderation.py`, `services/ranks.py` | Member permissions, guild transformations, blacklist calculations, role decisions, rank thresholds, and known error messages. |
+| `services/administration.py` | SQL result formatting and configuration mutations for permissions, channels, ticket categories, and triggers. |
+| `services/help.py`, `services/leveling.py`, `services/honeypot.py`, `services/triggers.py` | Help filtering, level calculations, honeypot state, trigger matching, and cooldown decisions. |
+| `services/attendance.py`, `services/trainings.py` | Attendance maps/reports, training signup content, date normalization, and present-user derivation. |
+| `services/missions.py` | Mission roster rendering, date parsing, sign-out cutoff, slot normalization, and persistent component IDs. |
+| `ticket/services.py` | Ticket administration checks, category parsing, persistent create-view IDs, and transcript rendering. |
+
+These modules do not own Discord clients, cog caches, locks, or database transactions. Cogs retain the same command names, decorators, responses, model calls, and side-effect ordering while delegating the stateless steps.
+
 ## Commands by cog
 
 ### `Attendence.py`
@@ -145,3 +165,5 @@ Configuration commands mutate the bot's shared in-memory dictionaries/lists. The
 ## Adding or changing a module
 
 When a command, listener, permission rule, configuration key, persistent view, or model call changes, update this catalog and the relevant domain/configuration document. Add tests at the local boundary; Discord API behavior remains a manual test in a non-production guild.
+
+The durable rationale for these boundaries is recorded in [ADR-0001](decisions/0001-service-boundaries.md).

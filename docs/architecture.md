@@ -41,6 +41,8 @@ flowchart TD
 
 Cog classes remain the Discord interaction boundary: decorators, persistent views, locks, and component registration stay in `Cogs/`. Stateless cross-cutting operations live in `utils/`, while multi-step workflows live in `services/` and receive their dependencies explicitly. This separation changes code organization only; command names, responses, permissions, model calls, and side-effect ordering remain the same.
 
+The durable rationale and constraints for this split are recorded in [ADR-0001](decisions/0001-service-boundaries.md).
+
 Member and moderation services centralize guild targeting, invite snapshots, configured permission checks, blacklist date calculations, role-whitelist decisions, rank thresholds, and known command-error messages. They do not own Discord state or database connections; cogs still control the surrounding side effects.
 
 Administration services own pure SQL result formatting and mutation rules for configured permissions, channels, ticket categories, and message triggers. `Utilities` keeps command decorators and sends the existing responses around those operations.
