@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from typing import Any, cast
 import discord
 
-from db.models import Tickets, TicketTypes, TicketCreateMessages
+from db.models.ticket_create_messages import TicketCreateMessages
+from db.models.ticket_types import TicketTypes
+from db.models.tickets import Tickets
 
 from ticket.types.mission import MissionTicketType
 from ticket.types.proposal import ProposalTicketType

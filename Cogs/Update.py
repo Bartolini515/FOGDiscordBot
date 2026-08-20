@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from db.models import Users
+from db.models.users import Users
 
 
 class Update(commands.Cog):

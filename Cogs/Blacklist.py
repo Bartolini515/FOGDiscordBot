@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from db.models import Blacklist
+from db.models.blacklist import Blacklist
 import logging
 from datetime import datetime, timedelta
 

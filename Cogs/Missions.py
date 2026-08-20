@@ -4,7 +4,9 @@ import os
 import discord
 from discord.ext import commands
 from discord import app_commands
-from db.models import Missions, Slots, Squads
+from db.models.missions import Missions
+from db.models.slots import Slots
+from db.models.squads import Squads
 import logging
 import asyncio
 import datetime

@@ -4,7 +4,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
-from db.models import Attendance, Users, Ranks
+from db.models.attendance import Attendance
+from db.models.ranks import Ranks
+from db.models.users import Users
 import logging
 
 logger = logging.getLogger("fogbot")

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from configuration import ConfigurationError, ensure_configuration_file, load_configuration
 from db.database import Database
-from db.models import Users
+from db.models.users import Users
 
 CONFIG_PATH = Path("configuration.json")
 CONFIG_TEMPLATE_PATH = Path(__file__).with_name("configuration.example.json")

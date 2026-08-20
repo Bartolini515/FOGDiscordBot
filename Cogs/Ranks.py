@@ -1,7 +1,9 @@
 """Translate attendance events into stored and Discord role promotions."""
 
 from discord.ext import commands
-from db.models import Users, Ranks, Attendance
+from db.models.attendance import Attendance
+from db.models.ranks import Ranks
+from db.models.users import Users
 import logging
 
 logger = logging.getLogger("fogbot")

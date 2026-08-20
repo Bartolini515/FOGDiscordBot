@@ -4,7 +4,10 @@ import os
 import discord
 from discord.ext import commands
 from discord import app_commands
-from db.models import Attendance, Slots, Missions, Squads
+from db.models.attendance import Attendance
+from db.models.missions import Missions
+from db.models.slots import Slots
+from db.models.squads import Squads
 import logging
 
 logger = logging.getLogger("fogbot")

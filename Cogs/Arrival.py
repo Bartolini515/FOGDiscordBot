@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
 import logging
-from db.models import Users, Blacklist
+from db.models.blacklist import Blacklist
+from db.models.users import Users
 from datetime import datetime
 
 logger = logging.getLogger("fogbot")

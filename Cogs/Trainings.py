@@ -4,7 +4,8 @@ import os
 import discord
 from discord.ext import commands
 from discord import app_commands
-from db.models import Trainings, TrainingSigned
+from db.models.training_signed import TrainingSigned
+from db.models.trainings import Trainings
 import logging
 import asyncio
 import datetime

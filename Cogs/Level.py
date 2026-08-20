@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from db.models import Users
+from db.models.users import Users
 import logging
 import random
 from discord.ext import tasks

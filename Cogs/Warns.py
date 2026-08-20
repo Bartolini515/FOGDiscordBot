@@ -3,7 +3,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
-from db.models import Warns, Users
+from db.models.users import Users
+from db.models.warns import Warns
 
 
 logger = logging.getLogger("fogbot")
@@ -120,4 +121,3 @@ class WarnsCog(commands.Cog):
     
 async def setup(bot: commands.Bot):
     await bot.add_cog(WarnsCog(bot))
-    
