@@ -51,6 +51,8 @@ Attendance and training services render reports and signup content, normalize co
 
 Ticket-local services own ticket-admin checks, semicolon category parsing, persistent create-view IDs, and transcript HTML rendering. `ticket/core.py` continues to own category contracts, database adapters, type handlers, channel permissions, and ticket lifecycle persistence; `Cogs/Tickets.py` remains the interaction and view-registration boundary.
 
+Mission services own roster rendering, command/stored-date parsing, the 12-hour self-service cutoff, signup-slot normalization, slot projections, and persistent component IDs. `Cogs/Missions.py` retains mission locks, scheduling tasks, database/model calls, Discord message edits, responses, and component registration, so the service boundary does not alter mission side-effect ordering.
+
 The `on_ready` reconciliation marks every database user as off-guild, then inserts or updates the current non-bot guild members as present. It preserves historical users for attendance, warning, and mission references.
 
 An hourly background loop writes the in-memory configuration dictionary to `configuration.json`. The same save happens during graceful shutdown. Commands that edit configuration therefore change the shared dictionary first and rely on this lifecycle for persistence.

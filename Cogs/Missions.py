@@ -10,6 +10,18 @@ from db.models.squads import Squads
 import logging
 import asyncio
 import datetime
+from services.members import has_configured_permission
+from services.missions import (
+    build_slot_mapping,
+    mission_message_content,
+    mission_select_custom_id,
+    parse_mission_date,
+    parse_signup_slots,
+    parse_stored_mission_date,
+    signout_custom_id,
+    signout_is_too_close,
+)
+from utils.database import has_database
 
 
 
@@ -17,16 +29,7 @@ import datetime
 logger = logging.getLogger("fogbot")
 debug = os.getenv("DEBUG") == "True"
 
-def _message_content(slots_dict: dict[int, tuple[int, str, int | None]], squad: str) -> str:
-    """Render one squad's positional slot rows as the Discord roster message."""
-    header = f"📋 Zapisz się do drużyny **{squad}**:"
-    lines = [header]
-    for _, (_, label, user) in slots_dict.items():
-        mention = f"<@{user}>" if user else "_wolny_"
-        status = "✅" if user else "❌"
-        lines.append(f"- {label}  {status} - {mention}")
-    message_content = "\n".join(lines)
-    return message_content
+_message_content = mission_message_content
 
 # def _build_mission_embed(slots_dict: dict[int, tuple[int, str, int | None]], squad: str) -> discord.Embed:
 #     embed = discord.Embed(
@@ -147,7 +150,7 @@ class SlotSelect(discord.ui.Select):
 
                     view = discord.ui.View(timeout=None)
                     view.add_item(SlotSelect(slots=slots_dict, custom_id=self.custom_id_, squad=self.squad, mission_id=self.mission_id))
-                    view.add_item(SignOutButton(custom_id=f"signout_button_{interaction.message.id}"))
+                    view.add_item(SignOutButton(custom_id=signout_custom_id(interaction.message.id)))
                     await interaction.message.edit(content=_message_content(slots_dict=slots_dict, squad=self.squad), view=view)
                 except Exception as e:
                     self.logger.exception("Error while rebuilding current signup message (fallback)", exc_info=e)
@@ -195,16 +198,12 @@ class SignOutButton(discord.ui.Button):
         message_id = rows[1]
         
         try:
-            mission_date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+            mission_date = parse_stored_mission_date(date)
         except ValueError:
-            try:
-                mission_date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M")
-            except ValueError:
-                # Handle invalid date format
-                await interaction.followup.send("Skontaktuj się z administratorem. Zły format daty misji w bazie danych.", ephemeral=True)
-                return
+            await interaction.followup.send("Skontaktuj się z administratorem. Zły format daty misji w bazie danych.", ephemeral=True)
+            return
 
-        if mission_date < datetime.datetime.now() + datetime.timedelta(hours=12):
+        if signout_is_too_close(mission_date):
             await interaction.followup.send("Tylko twórca misji, bądź sztab, może cię wypisać na mniej niż 12 godzin przed jej rozpoczęciem.", ephemeral=True)
             return
         
@@ -262,12 +261,12 @@ class MissionsCog(commands.Cog):
         view.add_item(
             SlotSelect(
                 slots=slots_dict,
-                custom_id=f"mission_select_{message_id}",
+                custom_id=mission_select_custom_id(message_id),
                 squad=squad_name,
                 mission_id=mission_id,
             )
         )
-        view.add_item(SignOutButton(custom_id=f"signout_button_{message_id}"))
+        view.add_item(SignOutButton(custom_id=signout_custom_id(message_id)))
 
         await msg.edit(content=_message_content(slots_dict=slots_dict, squad=squad_name), view=view)
 
@@ -277,7 +276,7 @@ class MissionsCog(commands.Cog):
     async def _restore_missions_views(self):
         """Restore persistent mission signup views from the database on bot startup."""
         try:
-            if not hasattr(self.bot, "db") or self.bot.db is None:
+            if not has_database(self.bot):
                 return
             logger.info("Restoring mission views from database...")
             rows = await Slots.list(self.bot.db)
@@ -302,12 +301,12 @@ class MissionsCog(commands.Cog):
                 view.add_item(
                     SlotSelect(
                         slots=data,
-                        custom_id=f"mission_select_{message_id}",
+                        custom_id=mission_select_custom_id(message_id),
                         squad=squad_name,
                         mission_id=mission_id,
                     )
                 )
-                view.add_item(SignOutButton(custom_id=f"signout_button_{message_id}"))
+                view.add_item(SignOutButton(custom_id=signout_custom_id(message_id)))
                 self.bot.add_view(view, message_id=message_id)
                 self._registered_persistent_views.add(int(message_id))
         except Exception as e:
@@ -336,7 +335,7 @@ class MissionsCog(commands.Cog):
     async def _restore_missions_reminders(self):
         """Restore scheduled mission reminders on bot startup."""
         try:
-            if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+            if not has_database(self.bot): # Validation of db access
                 return
             logger.info("Restoring mission reminders from database...")
             rows = await Missions.list(self.bot.db)
@@ -349,10 +348,7 @@ class MissionsCog(commands.Cog):
                 if not date_str or not ping_role_id:
                     continue
                 
-                try:
-                    date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M")
+                date = parse_stored_mission_date(date_str)
                 reminder_time = date - datetime.timedelta(hours=1)
                 if reminder_time > datetime.datetime.now():
                     self._schedule_at(reminder_time, self._mission_reminder, channel_id, mission_name, date, ping_role_id, channel_id=channel_id)
@@ -390,7 +386,7 @@ class MissionsCog(commands.Cog):
         czy_ping="Czy dać ping na misję?",
     )
     async def misja_stworz(self, interaction: discord.Interaction, nazwa: str, data: str, czy_ping: bool):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         # Permission check: allow if user is explicitly allowed OR has an allowed role OR is admin
@@ -408,7 +404,7 @@ class MissionsCog(commands.Cog):
         if debug:
             logger.debug(f"Permission check - is_allowed_user: {is_allowed_user}, is_allowed_role: {is_allowed_role}")
 
-        if not (is_allowed_user or is_allowed_role or interaction.user.guild_permissions.administrator):
+        if not has_configured_permission(interaction.user, allowed):
             await interaction.response.send_message("Nie masz uprawnień do tworzenia misji.", ephemeral=True)
             return
         
@@ -433,7 +429,7 @@ class MissionsCog(commands.Cog):
         
         if data: # Validate date format
             try:
-                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M")
+                datetime_obj = parse_mission_date(data)
                 data = datetime_obj.isoformat(sep=' ')
             except ValueError:
                 await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM.", ephemeral=True)
@@ -473,7 +469,7 @@ class MissionsCog(commands.Cog):
     )
     @app_commands.guild_only()
     async def misja_anuluj(self, interaction: discord.Interaction):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
         if not rows: # Validation of mission existence
@@ -526,12 +522,12 @@ class MissionsCog(commands.Cog):
             await interaction.response.send_message("Musisz podać nową nazwę lub datę misji.", ephemeral=True)
             return
         
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         if data: # Validate date format
             try:
-                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M")
+                datetime_obj = parse_mission_date(data)
                 data = datetime_obj.isoformat(sep=' ')
             except ValueError:
                 await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM.", ephemeral=True)
@@ -588,14 +584,14 @@ class MissionsCog(commands.Cog):
         sloty="Lista slotów oddzielona średnikami (np. strzelec;medyk;KM)",
     )
     async def misja_zapisy_stworz(self, interaction: discord.Interaction, druzyna: str, sloty: str):
-        slots = [s.strip() for s in sloty.split(";") if s.strip()]
+        slots = parse_signup_slots(sloty)
         
         # Validation of inputs
         if len(slots) > 25:
             await interaction.response.send_message("Maksymalna liczba slotów to 25.", ephemeral=True)
             return
         
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
         if not rows: # Validation of mission existence
@@ -612,7 +608,7 @@ class MissionsCog(commands.Cog):
         
         # Construct slots dict for SlotSelect
         max_id = await Slots.max_id(self.bot.db)
-        slots_dict = {i: (i, slot, None) for i, slot in enumerate(slots, start=max_id[0] + 1 if max_id[0] else 0)}
+        slots_dict = build_slot_mapping(slots, max_id[0])
         
         view = discord.ui.View()
         select = SlotSelect(slots=slots_dict, squad=druzyna, mission_id=mission_id)
@@ -623,8 +619,8 @@ class MissionsCog(commands.Cog):
 
         # make the view persistent using the message id as part of the custom_id
         persistent_view = discord.ui.View(timeout=None)
-        persistent_view.add_item(SlotSelect(slots_dict, custom_id=f"mission_select_{message.id}", squad=druzyna, mission_id=mission_id))
-        persistent_view.add_item(SignOutButton(custom_id=f"signout_button_{message.id}"))
+        persistent_view.add_item(SlotSelect(slots_dict, custom_id=mission_select_custom_id(message.id), squad=druzyna, mission_id=mission_id))
+        persistent_view.add_item(SignOutButton(custom_id=signout_custom_id(message.id)))
         await message.edit(view=persistent_view)
 
         # Register persistent view once for this message
@@ -696,7 +692,7 @@ class MissionsCog(commands.Cog):
         message_id="ID wiadomości do usunięcia (alternatywa)",
     )
     async def misja_zapisy_usun(self, interaction: discord.Interaction, druzyna: str, message_id: int = None):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
@@ -745,7 +741,7 @@ class MissionsCog(commands.Cog):
     )
     async def misja_zapisy_wypisz(self, interaction: discord.Interaction, uzytkownik: discord.Member):
         await interaction.response.defer(ephemeral=True)
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
@@ -805,7 +801,7 @@ class MissionsCog(commands.Cog):
         slot="Nazwa slotu",
     )
     async def misja_zapisy_wpisz(self, interaction: discord.Interaction, uzytkownik: discord.Member, druzyna_id: str, slot: str):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
