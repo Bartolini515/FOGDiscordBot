@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
+from services.members import format_member_message, has_configured_permission
 
 
 logger = logging.getLogger("fogbot")
@@ -31,12 +32,7 @@ class Recruitment(commands.Cog):
         # Permission check: allow if user is explicitly allowed OR has an allowed role OR is admin
         allowed = self.bot.permissions.get("recruiters", [])
 
-        is_allowed_user = interaction.user.id in allowed
-        is_allowed_role = any(
-            role.id in allowed for role in interaction.user.roles
-        )
-
-        if not (is_allowed_user or is_allowed_role or interaction.user.guild_permissions.administrator):
+        if not has_configured_permission(interaction.user, allowed):
             await interaction.response.send_message("Nie masz uprawnień do rekrutacji użytkowników.", ephemeral=True)
             return
         
@@ -50,7 +46,7 @@ class Recruitment(commands.Cog):
         await uzytkownik.add_roles(recruit_role)
         
         recruitment_message = self.bot.messages.get("recruitment_message", "Gratulacje! Zostałeś zrekrutowany i otrzymałeś rolę Rekrut stając się pełnoprawnym członkiem grupy FOG!")
-        recruitment_message = recruitment_message.format(mention=uzytkownik.mention, name=uzytkownik.name, id=uzytkownik.id, guild=uzytkownik.guild.name, display_name=uzytkownik.display_name)
+        recruitment_message = format_member_message(recruitment_message, uzytkownik)
         
         await uzytkownik.send(recruitment_message)
         
@@ -74,12 +70,7 @@ class Recruitment(commands.Cog):
         # Permission check: allow if user is explicitly allowed OR has an allowed role OR is admin
         allowed = self.bot.permissions.get("basic_training_tickets_managers", []) + self.bot.permissions.get("recruiters", [])
 
-        is_allowed_user = interaction.user.id in allowed
-        is_allowed_role = any(
-            role.id in allowed for role in interaction.user.roles
-        )
-
-        if not (is_allowed_user or is_allowed_role or interaction.user.guild_permissions.administrator):
+        if not has_configured_permission(interaction.user, allowed):
             await interaction.response.send_message("Nie masz uprawnień do wysyłania wiadomości do użytkowników.", ephemeral=True)
             return
         
@@ -87,7 +78,7 @@ class Recruitment(commands.Cog):
         await uzytkownik.add_roles(szwi_role)
         
         recruitment_message = self.bot.messages.get("szwi_message", "Gratulacje! Przeszedłeś szkolenie podstawowe i jesteś gotowy do udziału w misjach grupy FOG!\n")
-        recruitment_message = recruitment_message.format(mention=uzytkownik.mention, name=uzytkownik.name, id=uzytkownik.id, guild=uzytkownik.guild.name, display_name=uzytkownik.display_name)
+        recruitment_message = format_member_message(recruitment_message, uzytkownik)
         
         await uzytkownik.send(recruitment_message)
         
@@ -95,4 +86,3 @@ class Recruitment(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Recruitment(bot))
-    

@@ -3,7 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 from db.models.blacklist import Blacklist
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
+from services.moderation import blacklist_expiration
+from utils.database import has_database
 
 logger = logging.getLogger("fogbot")
 
@@ -24,13 +26,13 @@ class BlacklistCog(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(uzytkownik="Użytkownik do dodania do blacklisty.", powod="Powód dodania do blacklisty.", czas_trwania="Czas trwania w dniach (opcjonalnie).")
     async def blacklist_dodaj(self, interaction: discord.Interaction, uzytkownik: discord.User, powod: str, czas_trwania: int | None = None):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
-        czas_trwania_date = datetime.now() + timedelta(days=czas_trwania) if czas_trwania else None
-        await Blacklist.add_to_blacklist(self.bot.db, uzytkownik.id, powod, czas_trwania_date.strftime("%Y-%m-%d %H:%M") if czas_trwania_date else None)
+        czas_trwania_date, expiration_text = blacklist_expiration(czas_trwania)
+        await Blacklist.add_to_blacklist(self.bot.db, uzytkownik.id, powod, expiration_text)
         await interaction.response.send_message(f"Użytkownik {uzytkownik.name} został dodany do blacklisty.", ephemeral=True)
         try:
-            await uzytkownik.send(f"Zostałeś dodany do blacklisty FOG.\nPowód: {powod}.\nKoniec blokady: {czas_trwania_date.strftime('%Y-%m-%d %H:%M') if czas_trwania_date else 'Nieskończony'}.")
+            await uzytkownik.send(f"Zostałeś dodany do blacklisty FOG.\nPowód: {powod}.\nKoniec blokady: {expiration_text if expiration_text else 'Nieskończony'}.")
             await uzytkownik.kick(reason=f"Użytkownik został dodany do blacklisty. Powód: {powod}.")
         except Exception as e:
             logger.warning(f"Could not send blacklist notification and kick {uzytkownik.name}: {e}")
@@ -47,7 +49,7 @@ class BlacklistCog(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(user_id="ID użytkownika do usunięcia z blacklisty.")
     async def blacklist_usun(self, interaction: discord.Interaction, user_id: str):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         await Blacklist.remove_from_blacklist(self.bot.db, int(user_id))
         await interaction.response.send_message(f"Użytkownik o id **{user_id}** został usunięty z blacklisty.", ephemeral=True)
@@ -61,7 +63,7 @@ class BlacklistCog(commands.Cog):
     )
     @app_commands.guild_only()
     async def blacklist_pokaz(self, interaction: discord.Interaction):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         blacklist_entries = await Blacklist.list(self.bot.db)
         if not blacklist_entries:

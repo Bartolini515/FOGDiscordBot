@@ -3,7 +3,9 @@ from discord.ext import commands
 import logging
 from db.models.blacklist import Blacklist
 from db.models.users import Users
-from datetime import datetime
+from services.members import find_used_invite, format_member_message, invite_snapshot, is_target_guild
+from services.moderation import format_blacklist_time_left
+from utils.database import has_database
 
 logger = logging.getLogger("fogbot")
 
@@ -18,30 +20,19 @@ class Arrival(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         invites = await self.bot.get_guild(self.bot.guild_id).invites()
-        self.invites = {invite.code: invite.uses for invite in invites}
+        self.invites = invite_snapshot(invites)
     
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        if member.guild is None:
-            return
-        if member.guild.id != self.bot.guild_id:
+        if not is_target_guild(member.guild, self.bot.guild_id):
             return
         
         invites_before = self.invites.copy()
         invites_after = await self.bot.get_guild(self.bot.guild_id).invites()
-        used_invite = None
-        for invite in invites_after:
-            if invite.code in invites_before:
-                if invite.uses > invites_before[invite.code]:
-                    used_invite = invite
-                    break
-            else:
-                if invite.uses > 0:
-                    used_invite = invite
-                    break
-        self.invites = {invite.code: invite.uses for invite in invites_after}
+        used_invite = find_used_invite(invites_before, invites_after)
+        self.invites = invite_snapshot(invites_after)
         
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validate db connection
+        if not has_database(self.bot): # Validate db connection
             return
         
         # Check if user is blacklisted
@@ -55,11 +46,7 @@ class Arrival(commands.Cog):
             reason = rows[1]
             end_at = rows[2]
             added_at = rows[3]
-            time_left = "Nieskończony"
-            if end_at:
-                end_date = datetime.fromisoformat(end_at)
-                delta = end_date - datetime.now()
-                time_left = str(delta.days) if delta.days > 0 else "-1"
+            time_left = format_blacklist_time_left(end_at)
             if self.log_channel_id:
                 log_channel = member.guild.get_channel(self.log_channel_id)
                 if log_channel and isinstance(log_channel, discord.TextChannel):
@@ -85,7 +72,7 @@ class Arrival(commands.Cog):
             # TODO: Update welcome message content
             dm_channel = await member.create_dm()
             welcome_message = self.bot.messages.get("welcome_message", "Witaj na serwerze FOG, {mention}!")
-            welcome_message = welcome_message.format(mention=member.mention, name=member.name, id=member.id, guild=member.guild.name, display_name=member.display_name)
+            welcome_message = format_member_message(welcome_message, member)
             await dm_channel.send(welcome_message)
         except Exception as e:
             logger.error(f"Nie udało się wysłać wiadomości powitalnej do {member} ({member.id}): {e}")

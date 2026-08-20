@@ -41,6 +41,8 @@ flowchart TD
 
 Cog classes remain the Discord interaction boundary: decorators, persistent views, locks, and component registration stay in `Cogs/`. Stateless cross-cutting operations live in `utils/`, while multi-step workflows live in `services/` and receive their dependencies explicitly. This separation changes code organization only; command names, responses, permissions, model calls, and side-effect ordering remain the same.
 
+Member and moderation services centralize guild targeting, invite snapshots, configured permission checks, blacklist date calculations, role-whitelist decisions, rank thresholds, and known command-error messages. They do not own Discord state or database connections; cogs still control the surrounding side effects.
+
 The `on_ready` reconciliation marks every database user as off-guild, then inserts or updates the current non-bot guild members as present. It preserves historical users for attendance, warning, and mission references.
 
 An hourly background loop writes the in-memory configuration dictionary to `configuration.json`. The same save happens during graceful shutdown. Commands that edit configuration therefore change the shared dictionary first and rely on this lifecycle for persistence.
