@@ -47,6 +47,8 @@ Administration services own pure SQL result formatting and mutation rules for co
 
 Help, leveling, trigger matching, and honeypot state transformations are exposed as pure service functions. Level and trigger caches, the leveling background loop, cooldown dictionaries, and honeypot Discord message updates remain owned by their cogs.
 
+Attendance and training services render reports and signup content, normalize command dates, and derive present-user lists. The cogs retain database writes, role changes, attendance dispatch, interaction responses, locks, and persistent view registration.
+
 The `on_ready` reconciliation marks every database user as off-guild, then inserts or updates the current non-bot guild members as present. It preserves historical users for attendance, warning, and mission references.
 
 An hourly background loop writes the in-memory configuration dictionary to `configuration.json`. The same save happens during graceful shutdown. Commands that edit configuration therefore change the shared dictionary first and rely on this lifecycle for persistence.

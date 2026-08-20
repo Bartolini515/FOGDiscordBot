@@ -8,22 +8,22 @@ from db.models.training_signed import TrainingSigned
 from db.models.trainings import Trainings
 import logging
 import asyncio
-import datetime
+from services.members import has_configured_permission
+from services.trainings import (
+    format_training_attendance,
+    normalize_training_date,
+    training_message_content,
+    training_present_user_ids,
+)
+from utils.database import has_database
+from utils.discord import parse_user_mentions
 
 
 logger = logging.getLogger("fogbot")
 debug = os.getenv("DEBUG") == "True"
 
 
-def _training_message_content(training_name: str, date_str: str | None, user_ids: list[int]) -> str:
-    header = f"📋 Zapisz się na szkolenie **{training_name}** {date_str}".strip()
-    lines = [header]
-    if not user_ids:
-        lines.append("_Brak zapisanych._")
-    else:
-        for user_id in user_ids:
-            lines.append(f"- <@{user_id}>")
-    return "\n".join(lines)
+_training_message_content = training_message_content
 
 
 class TrainingToggleButton(discord.ui.Button):
@@ -73,7 +73,7 @@ class TrainingsCog(commands.Cog):
     async def _restore_training_views(self):
         """Rebind signup callbacks to known Discord training messages."""
         try:
-            if not hasattr(self.bot, "db") or self.bot.db is None:
+            if not has_database(self.bot):
                 return
             logger.info("Restoring training signup views from database...")
             rows = await Trainings.list(self.bot.db)
@@ -109,7 +109,7 @@ class TrainingsCog(commands.Cog):
         await msg.edit(content=_training_message_content(training_name, training_date, user_ids), view=view)
 
     async def _handle_toggle(self, interaction: discord.Interaction, training_id: int):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
 
@@ -156,19 +156,13 @@ class TrainingsCog(commands.Cog):
         data="Data szkolenia np. 2026-01-08 18:30 (YYYY-MM-DD HH:MM)",
     )
     async def szkolenie_stworz(self, interaction: discord.Interaction, nazwa: str, data: str):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             return
 
         # Permission check: allow if user is explicitly allowed OR has an allowed role OR is admin
         allowed = self.bot.permissions.get("trainers", [])
 
-        is_allowed_user = interaction.user.id in allowed
-        is_allowed_role = any(
-            (r.id in allowed)
-            for r in interaction.user.roles
-        )
-
-        if not (is_allowed_user or is_allowed_role or interaction.user.guild_permissions.administrator):
+        if not has_configured_permission(interaction.user, allowed):
             await interaction.response.send_message("Nie masz uprawnień do tworzenia szkoleń.", ephemeral=True)
             return
 
@@ -179,8 +173,7 @@ class TrainingsCog(commands.Cog):
 
         if data: # Validate date format
             try:
-                datetime_obj = datetime.datetime.strptime(data, "%Y-%m-%d %H:%M")
-                data = datetime_obj.isoformat(sep=' ')
+                data = normalize_training_date(data)
             except ValueError:
                 await interaction.response.send_message("Niepoprawny format daty. Użyj YYYY-MM-DD HH:MM.", ephemeral=True)
                 return
@@ -219,7 +212,7 @@ class TrainingsCog(commands.Cog):
     )
     @app_commands.guild_only()
     async def szkolenie_anuluj(self, interaction: discord.Interaction):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             return
 
         rows = await Trainings.get_channel(self.bot.db, interaction.channel.id)
@@ -261,7 +254,7 @@ class TrainingsCog(commands.Cog):
         nieobecni="Użytkownicy nieobecni na szkoleniu (oddziel ich spacją).",
     )
     async def szkolenie_obecnosc(self, interaction: discord.Interaction, rola: discord.Role, nieobecni: str | None = None):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             return
 
         rows = await Trainings.get_channel(self.bot.db, interaction.channel.id)
@@ -278,14 +271,14 @@ class TrainingsCog(commands.Cog):
             await interaction.response.send_message("Tylko twórca szkolenia może zatwierdzać obecność.", ephemeral=True)
             return
 
-        absent_users = [u[2:-1] for u in nieobecni.split() if u.startswith("<@") and u.endswith(">")] if nieobecni else []
+        absent_users = parse_user_mentions(nieobecni)
 
         rows = await TrainingSigned.list_by_training(self.bot.db, training_id)
         if not rows:
             await interaction.response.send_message("Brak zapisanych użytkowników na to szkolenie.", ephemeral=True)
             return
 
-        present_users = [int(r[2]) for r in rows if str(r[2]) not in absent_users]
+        present_users = training_present_user_ids(rows, absent_users)
         for user_id in present_users:
             member = interaction.guild.get_member(user_id)
             if member:
@@ -295,13 +288,7 @@ class TrainingsCog(commands.Cog):
                     logger.warning(f"Nie udało się nadać rolę użytkownikowi {user_id}: {e}")
                     continue
 
-        all_user_ids = [int(r[2]) for r in rows if r[2] is not None]
-
-        lines = [f"📌 Obecność na szkoleniu **{training_name}** {training_date}".strip()]
-        for uid in all_user_ids:
-            status = "✅ obecny" if str(uid) not in absent_users else "❌ nieobecny"
-            lines.append(f"- <@{uid}> — {status}")
-        message_content = "\n".join(lines)
+        message_content = format_training_attendance(training_name, training_date, rows, absent_users)
         
         await interaction.channel.send(message_content)
 
