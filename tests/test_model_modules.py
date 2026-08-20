@@ -27,3 +27,10 @@ def test_model_class_is_defined_in_its_dedicated_module(module_name: str, class_
     model_class = getattr(module, class_name)
 
     assert model_class.__module__ == module_path
+
+
+def test_model_package_does_not_reexport_model_classes():
+    model_package = import_module("db.models")
+
+    for _, class_name in MODEL_MODULES:
+        assert not hasattr(model_package, class_name)
