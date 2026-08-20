@@ -8,7 +8,7 @@ FogDiscordBot is a single-process `discord.py` application for one FOG Discord g
 - `configuration.py` creates and validates local configuration.
 - `Cogs/` contains Discord slash commands, listeners, views, and background loops.
 - `db/database.py` owns the SQLite connection and yoyo migration step.
-- `db/models.py` contains asynchronous, SQL-oriented data access classes.
+- `db/models/` contains asynchronous, SQL-oriented data access classes, with one model class per module.
 - `db/migrations/` is the immutable history of the database schema.
 - `ticket/` contains ticket categories, handlers, and Discord UI components.
 - `scripts/check.py` is the portable local quality entry point.
@@ -47,7 +47,7 @@ An hourly background loop writes the in-memory configuration dictionary to `conf
 
 The committed migrations are the schema source of truth. Applied migrations must never be edited. Add schema changes as the next numbered migration and validate them against a new temporary database. Tests do not use `db/bot.db`.
 
-Model classes in `db/models.py` are thin asynchronous query collections. They commit writes themselves and normally return positional SQLite rows rather than named domain objects. Consult [Data model](data-model.md) before changing query columns or destructuring call sites.
+Model classes in `db/models/` are thin asynchronous query collections. They commit writes themselves and normally return positional SQLite rows rather than named domain objects. Consult [Data model](data-model.md) before changing query columns or destructuring call sites.
 
 ## Persistent views
 

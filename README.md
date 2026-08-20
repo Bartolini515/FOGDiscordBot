@@ -62,7 +62,7 @@ Tests use temporary migrated SQLite databases. They do not read `db/bot.db`, req
 
 ## Architecture at a glance
 
-`main.py` validates local configuration, owns the bot/database lifecycle, discovers cogs, synchronizes commands to the one FOG guild, reconciles guild members, and saves mutable configuration. Cogs handle Discord interactions and call thin asynchronous models in `db/models.py`. Migrations in `db/migrations/` define the SQLite schema. Mission, training, and ticket cogs reconstruct persistent component views from stored records during cog loading.
+`main.py` validates local configuration, owns the bot/database lifecycle, discovers cogs, synchronizes commands to the one FOG guild, reconciles guild members, and saves mutable configuration. Cogs handle Discord interactions and call thin asynchronous models in `db/models/`. Migrations in `db/migrations/` define the SQLite schema. Mission, training, and ticket cogs reconstruct persistent component views from stored records during cog loading.
 
 Mission signup messages are projections of mission, squad, and slot records. Selecting a new slot clears the member's previous slot in the same mission, writes the new assignment, and refreshes every affected message. Attendance is calculated from occupied slots and emits an internal event used for rank progression.
 

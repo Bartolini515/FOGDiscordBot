@@ -1,6 +1,6 @@
 # Data model
 
-SQLite is the durable source of truth for bot users, missions, training signups, tickets, warnings, and rank progression. The schema is defined by immutable yoyo migrations under `db/migrations/`; `db/models.py` is the query interface used by the cogs.
+SQLite is the durable source of truth for bot users, missions, training signups, tickets, warnings, and rank progression. The schema is defined by immutable yoyo migrations under `db/migrations/`; the modules in `db/models/` are the query interface used by the cogs.
 
 ## Entity relationships
 
