@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 import aiosqlite
 import discord
 from discord.ext import commands
@@ -8,48 +7,25 @@ from db.models.attendance import Attendance
 from db.models.ranks import Ranks
 from db.models.users import Users
 import logging
+from services.administration import (
+    add_permission_entry,
+    add_ticket_category,
+    edit_trigger,
+    format_sql_result,
+    is_bot_owner,
+    remove_channel_mapping,
+    remove_permission_entry,
+    remove_ticket_category,
+    remove_trigger,
+    set_channel_mapping,
+    split_sql_response,
+)
 
 logger = logging.getLogger("fogbot")
 
-
-async def _is_bot_owner(interaction: discord.Interaction) -> bool:
-    return interaction.user.id == getattr(interaction.client, "owner_id", None)
-
-
-def _format_sql_result(
-    description: Sequence[tuple] | None,
-    rows: Sequence[tuple],
-    rowcount: int,
-) -> str:
-    if description:
-        columns = " | ".join(str(column[0]) for column in description)
-        if not rows:
-            return f"Columns: {columns}\nNo rows returned."
-        return "\n".join([f"Columns: {columns}", *(repr(tuple(row)) for row in rows)])
-    if rowcount >= 0:
-        return f"Statement executed successfully. Rows affected: {rowcount}."
-    return "Statement executed successfully."
-
-
-def _split_sql_response(content: str, limit: int = 2_000) -> list[str]:
-    chunks: list[str] = []
-    current = ""
-    for line in content.splitlines() or [""]:
-        while len(line) > limit:
-            if current:
-                chunks.append(current)
-                current = ""
-            chunks.append(line[:limit])
-            line = line[limit:]
-        candidate = line if not current else f"{current}\n{line}"
-        if len(candidate) <= limit:
-            current = candidate
-        else:
-            chunks.append(current)
-            current = line
-    if current or not chunks:
-        chunks.append(current)
-    return chunks
+_is_bot_owner = is_bot_owner
+_format_sql_result = format_sql_result
+_split_sql_response = split_sql_response
 
 
 class Utilities(commands.Cog):
@@ -285,27 +261,24 @@ class Utilities(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
 
-        if kategoria not in self.bot.permissions:
+        status = add_permission_entry(
+            self.bot.permissions,
+            kategoria,
+            user_id=uzytkownik.id if uzytkownik else None,
+            role_id=rola.id if rola else None,
+        )
+        if status == "missing_category":
             await interaction.response.send_message(f"Kategoria '{kategoria}' nie istnieje.", ephemeral=True)
             return
-
-        if uzytkownik is None and rola is None:
+        if status == "missing_target":
             await interaction.response.send_message("Musisz podać użytkownika lub rolę do dodania.", ephemeral=True)
             return
-
-        if uzytkownik:
-            user_id = uzytkownik.id
-            if user_id in self.bot.permissions[kategoria]:
-                await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} już posiada uprawnienia w kategorii '{kategoria}'.", ephemeral=True)
-                return
-            self.bot.permissions[kategoria].append(user_id)
-
-        if rola:
-            role_id = rola.id
-            if role_id in self.bot.permissions[kategoria]:
-                await interaction.response.send_message(f"Rola {rola.mention} już posiada uprawnienia w kategorii '{kategoria}'.", ephemeral=True)
-                return
-            self.bot.permissions[kategoria].append(role_id)
+        if status == "user_exists":
+            await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} już posiada uprawnienia w kategorii '{kategoria}'.", ephemeral=True)
+            return
+        if status == "role_exists":
+            await interaction.response.send_message(f"Rola {rola.mention} już posiada uprawnienia w kategorii '{kategoria}'.", ephemeral=True)
+            return
 
         await interaction.response.send_message("Uprawnienia zostały zaktualizowane.", ephemeral=True)
         
@@ -328,27 +301,24 @@ class Utilities(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
 
-        if kategoria not in self.bot.permissions:
+        status = remove_permission_entry(
+            self.bot.permissions,
+            kategoria,
+            user_id=uzytkownik.id if uzytkownik else None,
+            role_id=rola.id if rola else None,
+        )
+        if status == "missing_category":
             await interaction.response.send_message(f"Kategoria '{kategoria}' nie istnieje.", ephemeral=True)
             return
-
-        if uzytkownik is None and rola is None:
+        if status == "missing_target":
             await interaction.response.send_message("Musisz podać użytkownika lub rolę do usunięcia.", ephemeral=True)
             return
-
-        if uzytkownik:
-            user_id = uzytkownik.id
-            if user_id not in self.bot.permissions[kategoria]:
-                await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} nie posiada uprawnień w kategorii '{kategoria}'.", ephemeral=True)
-                return
-            self.bot.permissions[kategoria].remove(user_id)
-
-        if rola:
-            role_id = rola.id
-            if role_id not in self.bot.permissions[kategoria]:
-                await interaction.response.send_message(f"Rola {rola.mention} nie posiada uprawnień w kategorii '{kategoria}'.", ephemeral=True)
-                return
-            self.bot.permissions[kategoria].remove(role_id)
+        if status == "user_missing":
+            await interaction.response.send_message(f"Użytkownik {uzytkownik.mention} nie posiada uprawnień w kategorii '{kategoria}'.", ephemeral=True)
+            return
+        if status == "role_missing":
+            await interaction.response.send_message(f"Rola {rola.mention} nie posiada uprawnień w kategorii '{kategoria}'.", ephemeral=True)
+            return
 
         await interaction.response.send_message("Uprawnienia zostały zaktualizowane.", ephemeral=True)
         
@@ -402,11 +372,10 @@ class Utilities(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
 
-        if kategoria not in self.bot.channels:
+        if not set_channel_mapping(self.bot.channels, kategoria, kanal.id):
             await interaction.response.send_message(f"Kategoria '{kategoria}' nie istnieje.", ephemeral=True)
             return
 
-        self.bot.channels[kategoria] = kanal.id
         await interaction.response.send_message(f"Kanał dla kategorii '{kategoria}' został ustawiony na {kanal.mention}.", ephemeral=True)
         
     # /channels_remove
@@ -426,11 +395,10 @@ class Utilities(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
 
-        if kategoria not in self.bot.channels:
+        if not remove_channel_mapping(self.bot.channels, kategoria):
             await interaction.response.send_message(f"Kategoria '{kategoria}' nie istnieje.", ephemeral=True)
             return
 
-        self.bot.channels[kategoria] = None
         await interaction.response.send_message(f"Kanał dla kategorii '{kategoria}' został usunięty.", ephemeral=True)
     
     
@@ -487,7 +455,10 @@ class Utilities(commands.Cog):
             return
 
         categories = self.bot.ticket_system.get("ticket_categories", [])
-        categories.append({"name": name, "description": description, "type": "custom", "category_id": category.id, "prompt_title": prompt_title})
+        add_ticket_category(
+            categories,
+            {"name": name, "description": description, "type": "custom", "category_id": category.id, "prompt_title": prompt_title},
+        )
         self.bot.ticket_system["ticket_categories"] = categories
 
         await interaction.response.send_message(f"Kategoria ticketów '{name}' została dodana.", ephemeral=True)
@@ -510,16 +481,11 @@ class Utilities(commands.Cog):
             return
 
         categories = self.bot.ticket_system.get("ticket_categories", [])
-        categories_copy = categories.copy()
-        for category in categories:
-            if category.get("name") == name:
-                if category.get("type") != "custom":
-                    await interaction.response.send_message(f"Kategoria ticketów '{name}' nie może zostać usunięta, ponieważ nie jest kategorią niestandardową.", ephemeral=True)
-                    return
-                categories.remove(category)
-                break
-
-        if len(categories) == len(categories_copy):
+        status = remove_ticket_category(categories, name)
+        if status == "protected":
+            await interaction.response.send_message(f"Kategoria ticketów '{name}' nie może zostać usunięta, ponieważ nie jest kategorią niestandardową.", ephemeral=True)
+            return
+        if status == "missing":
             await interaction.response.send_message(f"Kategoria ticketów '{name}' nie została znaleziona.", ephemeral=True)
             return
 
@@ -644,23 +610,19 @@ class Utilities(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
 
-        for trigger in self.bot.message_triggers:
-            if trigger.get("keyword") == keyword:
-                if new_response is not None:
-                    trigger["response"] = new_response
-                if new_case_sensitive is not None:
-                    trigger["case_sensitive"] = new_case_sensitive
-                if new_whole_word is not None:
-                    trigger["whole_word"] = new_whole_word
-                if new_enabled is not None:
-                    trigger["enabled"] = new_enabled
-                if new_cooldown_seconds is not None:
-                    trigger["cooldown_seconds"] = new_cooldown_seconds
-                if new_description is not None:
-                    trigger["description"] = new_description
-
-                await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' została zaktualizowana.", ephemeral=True)
-                return
+        updated = edit_trigger(
+            self.bot.message_triggers,
+            keyword,
+            response=new_response,
+            case_sensitive=new_case_sensitive,
+            whole_word=new_whole_word,
+            enabled=new_enabled,
+            cooldown_seconds=new_cooldown_seconds,
+            description=new_description,
+        )
+        if updated:
+            await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' została zaktualizowana.", ephemeral=True)
+            return
 
         await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' nie została znaleziona.", ephemeral=True)
         
@@ -681,11 +643,10 @@ class Utilities(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień administratora do użycia tej komendy.", ephemeral=True)
             return
         
-        for trigger in self.bot.message_triggers:
-            if trigger.get("keyword") == keyword:
-                self.bot.message_triggers.remove(trigger)
-                await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' została usunięta.", ephemeral=True)
-                return
+        removed = remove_trigger(self.bot.message_triggers, keyword)
+        if removed:
+            await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' została usunięta.", ephemeral=True)
+            return
 
         await interaction.response.send_message(f"Wiadomość wyzwalająca '{keyword}' nie została znaleziona.", ephemeral=True)
 

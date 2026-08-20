@@ -43,6 +43,8 @@ Cog classes remain the Discord interaction boundary: decorators, persistent view
 
 Member and moderation services centralize guild targeting, invite snapshots, configured permission checks, blacklist date calculations, role-whitelist decisions, rank thresholds, and known command-error messages. They do not own Discord state or database connections; cogs still control the surrounding side effects.
 
+Administration services own pure SQL result formatting and mutation rules for configured permissions, channels, ticket categories, and message triggers. `Utilities` keeps command decorators and sends the existing responses around those operations.
+
 The `on_ready` reconciliation marks every database user as off-guild, then inserts or updates the current non-bot guild members as present. It preserves historical users for attendance, warning, and mission references.
 
 An hourly background loop writes the in-memory configuration dictionary to `configuration.json`. The same save happens during graceful shutdown. Commands that edit configuration therefore change the shared dictionary first and rely on this lifecycle for persistence.
