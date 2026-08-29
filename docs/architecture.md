@@ -20,24 +20,28 @@ FogDiscordBot is a single-process `discord.py` application for one FOG Discord g
 
 ```mermaid
 flowchart TD
-    A["Run main.py"] --> B["Load .env"]
+    A["Run main.py"] --> B["Resolve runtime paths"]
     B --> C{"configuration.json exists?"}
     C -- No --> D["Copy configuration.example.json"]
     D --> E["Exit and ask the operator to configure it"]
-    C -- Yes --> F["Validate configuration"]
-    F --> G["Create MyBot and Database"]
-    G --> H["setup_hook"]
-    H --> I["Apply yoyo migrations"]
-    I --> J["Open aiosqlite connection and enable foreign keys"]
-    J --> K["Load every Cogs/*.py extension"]
-    K --> L["Start hourly configuration autosave"]
-    L --> M["Sync application commands to the configured guild"]
-    M --> N["on_ready: reconcile guild members with users"]
-    N --> O["Serve Discord events and interactions"]
-    O --> P["close: save configuration and close SQLite"]
+    C -- Yes --> F["Validate configuration and load .env"]
+    F --> G["Acquire instance lock"]
+    G --> H["Create MyBot and Database"]
+    H --> I["setup_hook"]
+    I --> J["Apply yoyo migrations"]
+    J --> K["Open aiosqlite connection and enable foreign keys"]
+    K --> L["Load every Cogs/*.py extension"]
+    L --> M["Start autosave and readiness heartbeat tasks"]
+    M --> N["Sync application commands to the configured guild"]
+    N --> O["on_ready: reconcile users, then publish readiness"]
+    O --> P["Serve Discord events and interactions"]
+    P --> Q["disconnect: invalidate readiness"]
+    P --> R["close: invalidate, cancel tasks, save, close, release lock"]
 ```
 
-`main.py` uses all Discord intents and copies the application command tree into `guild_id`. This deliberately targets the single FOG guild instead of globally publishing commands. Cog modules are discovered from the filesystem and loaded as extensions, so a new cog becomes part of startup automatically when it provides the normal `setup(bot)` entry point.
+`main.py` uses all Discord intents and copies the application command tree into `guild_id`. This deliberately targets the single FOG guild instead of globally publishing commands. Cog modules are discovered from the filesystem and loaded as extensions, so a new cog becomes part of startup automatically when it provides the normal `setup(bot)` entry point. Importing `main.py` has no startup side effects; the callable `main()` owns configuration bootstrap, environment loading, instance locking, and Discord startup.
+
+Before creating the database connection or contacting Discord, `main()` acquires the configured exclusive runtime lock. The runtime path contract is documented in [Configuration](configuration.md#runtime-paths). `ready.json` is atomically written only after `on_ready` completes member reconciliation, refreshed while Discord remains ready, and removed on disconnect and shutdown. Autosave and heartbeat tasks are cancelled during shutdown; the lock is released only after Discord shutdown completes.
 
 Cog classes remain the Discord interaction boundary: decorators, persistent views, locks, and component registration stay in `Cogs/`. Stateless cross-cutting operations live in `utils/`, while multi-step workflows live in `services/` and receive their dependencies explicitly. This separation changes code organization only; command names, responses, permissions, model calls, and side-effect ordering remain the same.
 

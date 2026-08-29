@@ -115,6 +115,12 @@ logs/bot.log
 
 Review only the minimum relevant lines and anonymize member names, Discord IDs, ticket titles/content, warning reasons, and channel/message data before sharing. Logs may contain operational details even when they do not contain the token.
 
+## Runtime readiness or duplicate instance
+
+The application takes an exclusive instance lock before opening SQLite or contacting Discord. A second process using the same `FOGBOT_INSTANCE_LOCK` exits rather than waiting. Stop the stale local process before investigating its runtime directory; do not delete a lock while a process may still be active.
+
+`ready.json` is created in `FOGBOT_RUNTIME_DIR` only after the bot has connected and completed startup reconciliation. It is removed on disconnect or graceful shutdown. A release SHA of `unknown` is expected for local development without a valid `RELEASE_SHA` file. Runtime paths and health-state fields are described in [Configuration](configuration.md#runtime-paths); do not put production paths or record contents in issues.
+
 ## Read-only service diagnosis
 
 The known production unit is `fogbot.service`. These commands inspect state only:
