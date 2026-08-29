@@ -1,7 +1,9 @@
 import discord
 from discord.ext import commands
-from db.models import Users
+from db.models.users import Users
 from datetime import datetime
+from services.members import is_target_guild
+from utils.database import has_database
 
 
 class Departure(commands.Cog):
@@ -13,12 +15,10 @@ class Departure(commands.Cog):
     
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        if member.guild is None:
-            return
-        if member.guild.id != self.bot.guild_id:
+        if not is_target_guild(member.guild, self.bot.guild_id):
             return
         
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validate db connection
+        if not has_database(self.bot): # Validate db connection
             return
         
         # Change user status on guild to left

@@ -2,6 +2,7 @@ from collections import defaultdict
 import discord
 from discord.ext import commands
 from discord import app_commands
+from services.help import command_category, user_can_see_command
 
 
 class Help(commands.Cog):
@@ -10,26 +11,11 @@ class Help(commands.Cog):
         self.bot = bot
         
     def _category_for(self, command: app_commands.Command) -> str:
-        # Try to get category from command extras
-        if getattr(command, "extras", None):
-            category = command.extras.get("category")
-            if isinstance(category, str) and category.strip():
-                return category
-
-        # Else if command is part of a group, return the group name
-        if isinstance(command.parent, app_commands.Group):
-            return command.parent.name
-
-        return "Inne"
+        return command_category(command)
 
     # TODO: Test if works
     def _user_can_see(self, interaction: discord.Interaction, command: app_commands.Command) -> bool:
-        dp: discord.Permissions | None = getattr(command, "default_permissions", None)
-        if dp is None:
-            return True
-
-        user_perms = interaction.user.guild_permissions
-        return dp.is_subset(user_perms)
+        return user_can_see_command(interaction, command)
 
 
     @app_commands.command(

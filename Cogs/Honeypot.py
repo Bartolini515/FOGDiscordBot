@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
+from services.honeypot import counter_entries_for_channel, valid_counter_entries
 
 logger = logging.getLogger("fogbot")
 
@@ -11,12 +12,7 @@ class HoneypotCog(commands.Cog):
         self.bot = bot
         self.tracked_channels = {channel_id for channel_id in self.bot.honeypot_system["honeypot_channels"]}
         self.trap_counter = self.bot.honeypot_system.get("trap_counter", 0)
-        self.counter_messages = [
-            entry for entry in self.bot.honeypot_system.get("counter_messages", [])
-            if isinstance(entry, dict)
-            and entry.get("channel_id") is not None
-            and entry.get("message_id") is not None
-        ]
+        self.counter_messages = valid_counter_entries(self.bot.honeypot_system.get("counter_messages", []))
 
     async def _update_counter_messages(self):
         if not self.counter_messages:
@@ -39,10 +35,7 @@ class HoneypotCog(commands.Cog):
                 message = await channel.fetch_message(message_id)
                 await message.edit(content=f"Obecna ilość banów: {self.trap_counter}")
             except discord.NotFound:
-                self.counter_messages = [
-                    item for item in self.counter_messages
-                    if not (isinstance(item, dict) and item.get("channel_id") == channel_id)
-                ]
+                self.counter_messages = counter_entries_for_channel(self.counter_messages, channel_id)
                 self.bot.honeypot_system["counter_messages"] = self.counter_messages
             except discord.Forbidden:
                 logger.warning(f"Missing permissions to update counter message in {channel.name}.")
@@ -68,10 +61,7 @@ class HoneypotCog(commands.Cog):
         except discord.NotFound:
             pass
 
-        self.counter_messages = [
-            entry for entry in self.counter_messages
-            if not (isinstance(entry, dict) and entry.get("channel_id") == channel.id)
-        ]
+        self.counter_messages = counter_entries_for_channel(self.counter_messages, channel.id)
         self.bot.honeypot_system["counter_messages"] = self.counter_messages
 
     @commands.Cog.listener()

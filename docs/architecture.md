@@ -6,9 +6,11 @@ FogDiscordBot is a single-process `discord.py` application for one FOG Discord g
 
 - `main.py` owns process startup, bot lifecycle, cog discovery, guild command synchronization, configuration autosave, and shutdown.
 - `configuration.py` creates and validates local configuration.
+- `utils/` contains stateless helpers shared across cogs and services.
+- `services/` contains typed, explicit-dependency workflow functions grouped by domain.
 - `Cogs/` contains Discord slash commands, listeners, views, and background loops.
 - `db/database.py` owns the SQLite connection and yoyo migration step.
-- `db/models.py` contains asynchronous, SQL-oriented data access classes.
+- `db/models/` contains asynchronous, SQL-oriented data access classes, with one model class per module.
 - `db/migrations/` is the immutable history of the database schema.
 - `ticket/` contains ticket categories, handlers, and Discord UI components.
 - `scripts/check.py` is the portable local quality entry point.
@@ -37,6 +39,22 @@ flowchart TD
 
 `main.py` uses all Discord intents and copies the application command tree into `guild_id`. This deliberately targets the single FOG guild instead of globally publishing commands. Cog modules are discovered from the filesystem and loaded as extensions, so a new cog becomes part of startup automatically when it provides the normal `setup(bot)` entry point.
 
+Cog classes remain the Discord interaction boundary: decorators, persistent views, locks, and component registration stay in `Cogs/`. Stateless cross-cutting operations live in `utils/`, while multi-step workflows live in `services/` and receive their dependencies explicitly. This separation changes code organization only; command names, responses, permissions, model calls, and side-effect ordering remain the same.
+
+The durable rationale and constraints for this split are recorded in [ADR-0001](decisions/0001-service-boundaries.md).
+
+Member and moderation services centralize guild targeting, invite snapshots, configured permission checks, blacklist date calculations, role-whitelist decisions, rank thresholds, and known command-error messages. They do not own Discord state or database connections; cogs still control the surrounding side effects.
+
+Administration services own pure SQL result formatting and mutation rules for configured permissions, channels, ticket categories, and message triggers. `Utilities` keeps command decorators and sends the existing responses around those operations.
+
+Help, leveling, trigger matching, and honeypot state transformations are exposed as pure service functions. Level and trigger caches, the leveling background loop, cooldown dictionaries, and honeypot Discord message updates remain owned by their cogs.
+
+Attendance and training services render reports and signup content, normalize command dates, and derive present-user lists. The cogs retain database writes, role changes, attendance dispatch, interaction responses, locks, and persistent view registration.
+
+Ticket-local services own ticket-admin checks, semicolon category parsing, persistent create-view IDs, and transcript HTML rendering. `ticket/core.py` continues to own category contracts, database adapters, type handlers, channel permissions, and ticket lifecycle persistence; `Cogs/Tickets.py` remains the interaction and view-registration boundary.
+
+Mission services own roster rendering, command/stored-date parsing, the 12-hour self-service cutoff, signup-slot normalization, slot projections, and persistent component IDs. `Cogs/Missions.py` retains mission locks, scheduling tasks, database/model calls, Discord message edits, responses, and component registration, so the service boundary does not alter mission side-effect ordering.
+
 The `on_ready` reconciliation marks every database user as off-guild, then inserts or updates the current non-bot guild members as present. It preserves historical users for attendance, warning, and mission references.
 
 An hourly background loop writes the in-memory configuration dictionary to `configuration.json`. The same save happens during graceful shutdown. Commands that edit configuration therefore change the shared dictionary first and rely on this lifecycle for persistence.
@@ -47,7 +65,7 @@ An hourly background loop writes the in-memory configuration dictionary to `conf
 
 The committed migrations are the schema source of truth. Applied migrations must never be edited. Add schema changes as the next numbered migration and validate them against a new temporary database. Tests do not use `db/bot.db`.
 
-Model classes in `db/models.py` are thin asynchronous query collections. They commit writes themselves and normally return positional SQLite rows rather than named domain objects. Consult [Data model](data-model.md) before changing query columns or destructuring call sites.
+Model classes in `db/models/` are thin asynchronous query collections. They commit writes themselves and normally return positional SQLite rows rather than named domain objects. Consult [Data model](data-model.md) before changing query columns or destructuring call sites.
 
 ## Persistent views
 

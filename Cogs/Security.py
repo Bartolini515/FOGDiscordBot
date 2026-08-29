@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 import logging
 from os import getenv
+from services.members import is_target_guild
+from services.moderation import roles_to_remove, should_enforce_role_whitelist
 
 logger = logging.getLogger("fogbot")
 debug = getenv("DEBUG") == "True"
@@ -15,9 +17,7 @@ class Security(commands.Cog):
         
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        if before.guild is None:
-            return
-        if before.guild.id != self.bot.guild_id:
+        if not is_target_guild(before.guild, self.bot.guild_id):
             return
         if before.roles == after.roles:
             return
@@ -40,28 +40,19 @@ class Security(commands.Cog):
             logger.debug(f"Whitelist role IDs: {whitelist_role_ids}")
 
         # Only enforce for candidates and other group members
-        for role in before.roles:
-            if role.id == candidate_role_id or role.id == other_group_role_id:
-                break
-        else:
+        if not should_enforce_role_whitelist(before.roles, candidate_role_id, other_group_role_id):
             return
         
         if debug:
             logger.debug(f"Enforcing role whitelist for {after} ({after.id})")
 
-        roles_to_remove = []
-        for role in after.roles:
-            # skip @everyone
-            if role.is_default():
-                continue
-            if role.id not in whitelist_role_ids:
-                roles_to_remove.append(role)
-                
+        roles_to_remove_list = roles_to_remove(after.roles, whitelist_role_ids)
+
         if debug:
-            logger.debug(f"Roles to remove from {after} ({after.id}): {[role.name for role in roles_to_remove]}")
+            logger.debug(f"Roles to remove from {after} ({after.id}): {[role.name for role in roles_to_remove_list]}")
 
         self.deleting_roles = True
-        for role in roles_to_remove:
+        for role in roles_to_remove_list:
             try:
                 await after.remove_roles(role, reason="Candidate role whitelist enforcement")
             except discord.Forbidden:

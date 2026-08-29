@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
 from Cogs.Ranks import RanksCog
-from db.models import Attendance, Users
+from db.models.attendance import Attendance
+from db.models.users import Users
 
 
 class FakeMember:

@@ -2,6 +2,7 @@ import logging
 import discord
 from discord.ext import commands
 from discord import app_commands
+from services.moderation import command_error_message
 
 logger = logging.getLogger("fogbot")
 
@@ -22,20 +23,9 @@ class ErrorHandler(commands.Cog):
         # Unwrap original error if it's a CommandInvokeError
         error = getattr(error, "original", error)
 
-        if isinstance(error, commands.CommandNotFound):
-            await ctx.send("Ta komenda nie istnieje.")
-            return
-
-        if isinstance(error, commands.DisabledCommand):
-            await ctx.send("Ta komenda jest obecnie niedostępna.")
-            return
-
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("Nie masz wymaganych uprawnień do uruchomienia tej komendy.")
-            return
-
-        if isinstance(error, commands.CommandOnCooldown):
-            await ctx.send(f"Ta komenda jest na cooldownie. Spróbuj ponownie za {error.retry_after:.1f}s.")
+        message = command_error_message(error)
+        if message is not None:
+            await ctx.send(message)
             return
 
         # Fallback for unhandled errors
@@ -48,17 +38,7 @@ class ErrorHandler(commands.Cog):
         orig = getattr(error, "original", error)
 
         try:
-            if isinstance(orig, commands.CommandNotFound):
-                msg = "Ta komenda nie istnieje."
-            elif isinstance(orig, commands.DisabledCommand):
-                msg = "Ta komenda jest obecnie niedostępna."
-            elif isinstance(orig, commands.MissingPermissions) or isinstance(orig, app_commands.CheckFailure):
-                msg = "Nie masz wymaganych uprawnień do uruchomienia tej komendy."
-            elif isinstance(orig, commands.CommandOnCooldown):
-                msg = f"Ta komenda jest na cooldownie. Spróbuj ponownie za {orig.retry_after:.1f}s."
-            else:
-                # Fallback for unhandled errors
-                msg = "Wystąpił nieoczekiwany błąd."
+            msg = command_error_message(orig) or "Wystąpił nieoczekiwany błąd."
 
             if interaction.response.is_done():
                 await interaction.followup.send(msg, ephemeral=True)

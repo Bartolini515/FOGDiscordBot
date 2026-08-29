@@ -1,5 +1,13 @@
 from db.database import Database
-from db.models import Attendance, Missions, Ranks, Slots, Squads, TicketTypes, Tickets, Users, Warns
+from db.models.attendance import Attendance
+from db.models.missions import Missions
+from db.models.ranks import Ranks
+from db.models.slots import Slots
+from db.models.squads import Squads
+from db.models.ticket_types import TicketTypes
+from db.models.tickets import Tickets
+from db.models.users import Users
+from db.models.warns import Warns
 from Cogs.Missions import MissionsCog
 
 

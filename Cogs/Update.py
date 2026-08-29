@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
-from db.models import Users
+from db.models.users import Users
+from services.members import is_target_guild
 
 
 class Update(commands.Cog):
@@ -10,18 +11,14 @@ class Update(commands.Cog):
     
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        if after.guild is None:
-            return
-        if after.guild.id != self.bot.guild_id:
+        if not is_target_guild(after.guild, self.bot.guild_id):
             return
         if before.name != after.name:
             await Users.update_username(self.bot.db, after.id, after.name)
             
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.guild is None:
-            return
-        if message.guild.id != self.bot.guild_id:
+        if not is_target_guild(message.guild, self.bot.guild_id):
             return
         if message.author.bot:
             return

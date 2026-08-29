@@ -4,8 +4,14 @@ import os
 import discord
 from discord.ext import commands
 from discord import app_commands
-from db.models import Attendance, Slots, Missions, Squads
+from db.models.attendance import Attendance
+from db.models.missions import Missions
+from db.models.slots import Slots
+from db.models.squads import Squads
 import logging
+from services.attendance import build_mission_attendance_maps, mission_attendance_report, present_user_ids
+from utils.database import has_database
+from utils.discord import parse_user_mentions
 
 logger = logging.getLogger("fogbot")
 debug = os.getenv("DEBUG") == "True"
@@ -28,7 +34,7 @@ class AttendanceCog(commands.Cog):
     )
     async def misja_obecnosc(self, interaction: discord.Interaction, nieobecni: str | None = None):
         """Record occupied mission slots except named absentees, then emit attendance."""
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         rows = await Missions.get_channel(self.bot.db, interaction.channel.id)
         if not rows: # Validation of mission existence
@@ -43,35 +49,21 @@ class AttendanceCog(commands.Cog):
             await interaction.response.send_message("Tylko twórca misji może anulować misję.", ephemeral=True)
             return
         
-        absent_users = [u[2:-1] for u in nieobecni.split() if u.startswith("<@") and u.endswith(">")] if nieobecni else []
+        absent_users = parse_user_mentions(nieobecni)
         
-        squad_map = {}
-        rows = await Squads.get_by_mission(self.bot.db, mission_id)
-        if not rows:
+        squad_rows = await Squads.get_by_mission(self.bot.db, mission_id)
+        if not squad_rows:
             await interaction.response.send_message("Brak zapisanych drużyn na tę misję.", ephemeral=True)
             return
-        for row in rows:
-            squad_map[row[0]] = row[2] # message_id: name
-            
-        slots_map = {} # message_id: [(name, user_id)]
-        rows = await Slots.get_by_mission(self.bot.db, mission_id)
-        if not rows:
+        slot_rows = await Slots.get_by_mission(self.bot.db, mission_id)
+        if not slot_rows:
             await interaction.response.send_message("Brak zapisanych użytkowników na tę misję.", ephemeral=True)
             return
-        for row in rows:
-            if debug:
-                logger.debug(f"Slot row: {row}")
-            if row[0] not in slots_map:
-                slots_map[row[0]] = []
-            slots_map[row[0]].append((row[2], row[3])) # (name, user_id)
+        squad_map, slots_map = build_mission_attendance_maps(squad_rows, slot_rows)
             
         if debug:
             logger.debug(f"Slots map for mission {mission_name} ({mission_date}): {slots_map}")
-        present_users = []
-        for mid, users in slots_map.items():
-            for label, user in users:
-                if user and str(user) not in absent_users:
-                    present_users.append(int(user))
+        present_users = present_user_ids(slots_map, absent_users)
         if present_users:
             if debug:
                 logger.debug(f"Recording attendance for mission {mission_name} ({mission_date}): Present users: {present_users}, Absent users: {absent_users}")
@@ -79,21 +71,15 @@ class AttendanceCog(commands.Cog):
             self.bot.dispatch("attendance", present_users)
         
         
-        message_content = f"Obecność na misji {mission_name} ({mission_date}):\n"
-        for squad in squad_map.items():
-            squad_message_id = squad[0]
-            squad_name = squad[1]
-            squad_members = slots_map.get(squad_message_id, [])
-            if squad_members:
-                header = f"Obecność **{squad_name}**:"
-                lines = [header]
-                for label, user in squad_members:
-                    mention = f"<@{user}>" if user else "*Brak*"
-                    status = "✅" if user in present_users else "❌"
-                    lines.append(f"- {label} - {mention} {status}")
-                message_content += "\n".join(lines) + "\n"
-            else:
-                await interaction.channel.send(f"Drużyna **{squad_name}** nie ma obecnych członków.")
+        message_content, empty_squads = mission_attendance_report(
+            mission_name,
+            mission_date,
+            squad_map,
+            slots_map,
+            present_users,
+        )
+        for squad_name in empty_squads:
+            await interaction.channel.send(f"Drużyna **{squad_name}** nie ma obecnych członków.")
                 
         channel = self.bot.get_channel(self.bot.channels["attendance_channel_id"])
         await channel.send(message_content)
@@ -110,7 +96,7 @@ class AttendanceCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(uzytkownik="Użytkownik, którego obecność chcesz sprawdzić.")
     async def obecnosc_gracz(self, interaction: discord.Interaction, uzytkownik: discord.User = None):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         user_id = uzytkownik.id if uzytkownik else interaction.user.id
         attendance_record = await Attendance.get_by_user(self.bot.db, user_id)
@@ -142,7 +128,7 @@ class AttendanceCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(limit="Liczba użytkowników do wyświetlenia w rankingu (domyślnie 10).")
     async def obecnosc_ranking(self, interaction: discord.Interaction, limit: int = 10):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         leaderboard = await Attendance.get_leaderboard(self.bot.db, limit)
         if not leaderboard:

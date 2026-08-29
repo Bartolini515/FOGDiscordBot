@@ -1,8 +1,12 @@
 """Translate attendance events into stored and Discord role promotions."""
 
 from discord.ext import commands
-from db.models import Users, Ranks, Attendance
+from db.models.attendance import Attendance
+from db.models.ranks import Ranks
+from db.models.users import Users
 import logging
+from services.ranks import should_promote_to_rank
+from utils.database import has_database
 
 logger = logging.getLogger("fogbot")
 
@@ -48,7 +52,7 @@ class RanksCog(commands.Cog):
     @commands.Cog.listener()
     async def on_attendance(self, user_ids: list[int]):
         """Promote attendees who reached the next seeded mission threshold."""
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             logger.warning("Database connection is not available.")
             return
         for user_id in user_ids:
@@ -62,7 +66,7 @@ class RanksCog(commands.Cog):
             all_time_missions = rows[2]
             
             max_missions = (await Ranks.get_max_rank(self.bot.db))[3]
-            
+
             if all_time_missions >= max_missions:
                 continue
             
@@ -78,7 +82,7 @@ class RanksCog(commands.Cog):
                 continue
             next_rank_required_missions = next_rank[3]
             
-            if all_time_missions >= next_rank_required_missions:
+            if should_promote_to_rank(all_time_missions, max_missions, next_rank_required_missions):
                 await self._rank_up(user_id, current_rank, next_rank)
 
 

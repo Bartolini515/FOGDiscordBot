@@ -3,13 +3,18 @@
 import os
 import io
 import logging
-import html
 import discord
 import inspect
 from discord.ext import commands
 from discord import app_commands
 
 from ticket import core
+from ticket.services import (
+    generate_transcript_html,
+    is_ticket_admin,
+    parse_category_selection,
+    ticket_create_custom_id,
+)
 from ticket.ui import (
     TicketCreateButtonView,
     TicketCreateSelectView,
@@ -17,6 +22,7 @@ from ticket.ui import (
     TicketClosedView,
     TicketTitleModal,
 )
+from utils.database import has_database
 
 
 logger = logging.getLogger("fogbot")
@@ -37,19 +43,12 @@ class TicketsCog(commands.Cog):
         await self._restore_ticket_views()
 
     def _is_ticket_admin(self, user: discord.Member, channel: discord.TextChannel) -> bool:
-        if user.guild_permissions.administrator:
-            return True
-
-        if channel is None:
-            return False
-
-        perms = channel.permissions_for(user)
-        return perms.manage_messages
+        return is_ticket_admin(user, channel)
 
     async def _restore_ticket_create_messages(self):
         """Recreate ticket entry views from serialized category payloads."""
         try:
-            if not hasattr(self.bot, "db") or self.bot.db is None:
+            if not has_database(self.bot):
                 return
             logger.info("Restoring ticket create messages from database...")
             rows = await core.list_ticket_create_messages(self.bot.db)
@@ -68,12 +67,12 @@ class TicketsCog(commands.Cog):
                 if mode == "button" and len(categories) == 1:
                     view = TicketCreateButtonView(
                         category_name=categories[0],
-                        custom_id=f"ticket_create_button_{message_id}",
+                        custom_id=ticket_create_custom_id("button", message_id),
                     )
                 else:
                     view = TicketCreateSelectView(
                         categories=categories,
-                        custom_id=f"ticket_create_select_{message_id}",
+                        custom_id=ticket_create_custom_id("select", message_id),
                     )
 
                 self.bot.add_view(view, message_id=message_id)
@@ -84,7 +83,7 @@ class TicketsCog(commands.Cog):
     async def _restore_ticket_views(self):
         """Register open or closed management views for stored ticket channels."""
         try:
-            if not hasattr(self.bot, "db") or self.bot.db is None:
+            if not has_database(self.bot):
                 return
             logger.info("Restoring ticket views from database...")
             rows = await core.list_tickets(self.bot.db)
@@ -118,7 +117,7 @@ class TicketsCog(commands.Cog):
         )
 
     async def _handle_ticket_title_submit(self, interaction: discord.Interaction, category_name: str, title: str):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
 
@@ -209,7 +208,7 @@ class TicketsCog(commands.Cog):
         )
 
     async def _handle_ticket_close(self, interaction: discord.Interaction, channel_id: int):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
 
@@ -248,7 +247,7 @@ class TicketsCog(commands.Cog):
         logger.info(f"Ticket in channel {channel_id} closed by {interaction.user} ({interaction.user.id})")
 
     async def _handle_ticket_reopen(self, interaction: discord.Interaction, channel_id: int):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
 
@@ -291,7 +290,7 @@ class TicketsCog(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień do generowania transcriptu.", ephemeral=True)
             return
 
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
 
@@ -325,7 +324,7 @@ class TicketsCog(commands.Cog):
             await interaction.response.send_message("Nie masz uprawnień do usuwania ticketów.", ephemeral=True)
             return
 
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
 
@@ -342,32 +341,7 @@ class TicketsCog(commands.Cog):
         await interaction.channel.delete(reason="Ticket deleted")
 
     async def _generate_transcript_html(self, channel: discord.TextChannel) -> str:
-        lines = []
-        lines.append("<!DOCTYPE html>")
-        lines.append("<html lang='pl'>")
-        lines.append("<head><meta charset='UTF-8'><title>Transcript</title>")
-        lines.append("<style>body{font-family:Arial, sans-serif;} .msg{margin:8px 0;} .meta{color:#666;font-size:12px;}</style>")
-        lines.append("</head><body>")
-        lines.append(f"<h2>Transcript kanału {html.escape(channel.name)}</h2>")
-
-        async for message in channel.history(limit=None, oldest_first=True):
-            author = html.escape(message.author.display_name)
-            created = message.created_at.strftime("%Y-%m-%d %H:%M")
-            content = html.escape(message.content) if message.content else ""
-            attachments = ""
-            if message.attachments:
-                links = " ".join(f"<a href='{att.url}'>{html.escape(att.filename)}</a>" for att in message.attachments)
-                attachments = f"<div>Załączniki: {links}</div>"
-            lines.append("<div class='msg'>")
-            lines.append(f"<div class='meta'>{created} | {author}</div>")
-            if content:
-                lines.append(f"<div>{content}</div>")
-            if attachments:
-                lines.append(attachments)
-            lines.append("</div>")
-
-        lines.append("</body></html>")
-        return "\n".join(lines)
+        return await generate_transcript_html(channel)
     
     
     # Listen for deleted messages to clean up ticket create messages
@@ -375,7 +349,7 @@ class TicketsCog(commands.Cog):
     async def on_message_delete(self, message: discord.Message):
         if message.guild is None:
             return
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             return
 
         # Check if this message is a registered ticket create message
@@ -404,7 +378,7 @@ class TicketsCog(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(kategoria="Nazwa kategorii ticketów")
     async def ticket_wiadomosc_przycisk(self, interaction: discord.Interaction, kategoria: str):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
         if not interaction.user.guild_permissions.administrator:
@@ -422,7 +396,7 @@ class TicketsCog(commands.Cog):
 
         view = TicketCreateButtonView(
             category_name=category.name,
-            custom_id=f"ticket_create_button_{message.id}",
+            custom_id=ticket_create_custom_id("button", message.id),
         )
         await message.edit(view=view)
 
@@ -446,14 +420,14 @@ class TicketsCog(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(kategorie="Lista kategorii oddzielona średnikami (np. Kategoria1;Kategoria2)")
     async def ticket_wiadomosc_select(self, interaction: discord.Interaction, kategorie: str):
-        if not hasattr(self.bot, "db") or self.bot.db is None:
+        if not has_database(self.bot):
             await interaction.response.send_message("Brak dostępu do bazy danych.", ephemeral=True)
             return
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("Nie masz uprawnień do tej komendy.", ephemeral=True)
             return
 
-        raw = [c.strip() for c in kategorie.split(";") if c.strip()]
+        raw = parse_category_selection(kategorie)
         if not raw:
             await interaction.response.send_message("Podaj przynajmniej jedną kategorię.", ephemeral=True)
             return
@@ -475,7 +449,7 @@ class TicketsCog(commands.Cog):
 
         view = TicketCreateSelectView(
             categories=categories,
-            custom_id=f"ticket_create_select_{message.id}",
+            custom_id=ticket_create_custom_id("select", message.id),
         )
         await message.edit(view=view)
 

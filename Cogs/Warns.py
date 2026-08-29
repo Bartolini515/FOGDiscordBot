@@ -3,7 +3,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
-from db.models import Warns, Users
+from db.models.users import Users
+from db.models.warns import Warns
+from utils.database import has_database
 
 
 logger = logging.getLogger("fogbot")
@@ -30,7 +32,7 @@ class WarnsCog(commands.Cog):
         powod="Powód dodania warna."
     )
     async def warn_add(self, interaction: discord.Interaction, uzytkownik: discord.User, powod: str):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         # Add the warn to the database
@@ -55,7 +57,7 @@ class WarnsCog(commands.Cog):
         warn_id="ID warna, który chcesz usunąć."
     )
     async def warn_remove(self, interaction: discord.Interaction, warn_id: int):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         warn = await Warns.get(self.bot.db, id=warn_id)
@@ -78,7 +80,7 @@ class WarnsCog(commands.Cog):
         uzytkownik="Użytkownik, którego warny chcesz sprawdzić."
     )
     async def warn_check(self, interaction: discord.Interaction, uzytkownik: discord.User):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         await Warns.recalculate_expired(self.bot.db) # Recalculate expired warns before fetching the list
@@ -102,7 +104,7 @@ class WarnsCog(commands.Cog):
     )
     @app_commands.guild_only()
     async def warn_list_users(self, interaction: discord.Interaction):
-        if not hasattr(self.bot, "db") or self.bot.db is None: # Validation of db access
+        if not has_database(self.bot): # Validation of db access
             return
         
         await Warns.recalculate_expired(self.bot.db) # Recalculate expired warns before fetching the list
@@ -120,4 +122,3 @@ class WarnsCog(commands.Cog):
     
 async def setup(bot: commands.Bot):
     await bot.add_cog(WarnsCog(bot))
-    
