@@ -1,6 +1,6 @@
 # Data model
 
-SQLite is the durable source of truth for bot users, missions, training signups, tickets, warnings, and rank progression. The schema is defined by immutable yoyo migrations under `db/migrations/`; the modules in `db/models/` are the query interface used by the cogs.
+SQLite is the durable source of truth for bot users, missions, training signups, tickets, warnings, and rank progression. The schema is defined by immutable yoyo migrations under `db/migrations/`; the modules in `db/models/` are the query interface used by the cogs. Applying migrations is an offline deployment phase through `python -m scripts.migrate --database <path>`, not an application-startup action.
 
 ## Entity relationships
 
@@ -107,7 +107,7 @@ Deleting a mission cascades to its squads and slots. Deleting a squad cascades t
 
 Migration `002` creates warning triggers. Inserts and deletes recalculate `users.warn_count` from non-expired warnings for the affected user. `Warns.recalculate_expired()` marks records older than 30 days as expired and recalculates every user's counter because an `UPDATE` of `expired` is not covered by those insert/delete triggers.
 
-Foreign-key actions only apply on connections where `PRAGMA foreign_keys = ON`. `Database.connect()` enables it for the application connection and the test suite asserts the setting.
+Foreign-key actions only apply on connections where `PRAGMA foreign_keys = ON`. `Database.connect()` enables it for the application connection and refuses to connect while committed migrations are pending; the test suite asserts both the current-schema and foreign-key contracts.
 
 ## Seed data
 
@@ -116,7 +116,7 @@ Migration `001` seeds:
 - six ordered rank thresholds, beginning at zero missions;
 - ticket handler types `mission`, `proposal`, `recruitment`, `basic_training`, and `custom`.
 
-Rank seeds contain historical real Discord role IDs. They are part of applied migration history and must not be copied to safe examples or rewritten in place. A future schema/data correction needs a new migration.
+Rank seeds contain historical real Discord role IDs. They are part of applied migration history and must not be copied to safe examples or rewritten in place. Applied migration files are immutable; a future schema/data correction needs a new migration.
 
 ## Discord identifiers
 

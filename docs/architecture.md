@@ -9,11 +9,11 @@ FogDiscordBot is a single-process `discord.py` application for one FOG Discord g
 - `utils/` contains stateless helpers shared across cogs and services.
 - `services/` contains typed, explicit-dependency workflow functions grouped by domain.
 - `Cogs/` contains Discord slash commands, listeners, views, and background loops.
-- `db/database.py` owns the SQLite connection and yoyo migration step.
+- `db/database.py` owns the SQLite connection and verifies that its schema is current.
 - `db/models/` contains asynchronous, SQL-oriented data access classes, with one model class per module.
 - `db/migrations/` is the immutable history of the database schema.
 - `ticket/` contains ticket categories, handlers, and Discord UI components.
-- `scripts/check.py` is the portable local quality entry point.
+- `scripts/check.py` is the portable local quality entry point; `scripts/migrate.py` is the offline migration entry point.
 - `tests/` exercises configuration and domain behavior without connecting to Discord.
 
 ## Process lifecycle
@@ -28,7 +28,7 @@ flowchart TD
     F --> G["Acquire instance lock"]
     G --> H["Create MyBot and Database"]
     H --> I["setup_hook"]
-    I --> J["Apply yoyo migrations"]
+    I --> J["Verify no committed migrations are pending"]
     J --> K["Open aiosqlite connection and enable foreign keys"]
     K --> L["Load every Cogs/*.py extension"]
     L --> M["Start autosave and readiness heartbeat tasks"]
@@ -65,9 +65,11 @@ An hourly background loop writes the in-memory configuration dictionary to `conf
 
 ## SQLite and migrations
 
-`Database.connect()` applies every pending yoyo migration before opening the long-lived `aiosqlite` connection. The connection then executes `PRAGMA foreign_keys = ON`; this must remain enabled for the documented cascades and `SET NULL` behavior.
+Migrations are an offline deployment phase, separate from the bot process. Before starting the bot, an operator must explicitly select a database and run `python -m scripts.migrate --database <path>`. `python -m scripts.migrate --database <path> --check` reports pending committed migrations without making schema changes. This entry point does not import Discord code or infer a database path.
 
-The committed migrations are the schema source of truth. Applied migrations must never be edited. Add schema changes as the next numbered migration and validate them against a new temporary database. Tests do not use `db/bot.db`.
+`Database.connect()` never applies migrations. It refuses to open a database with pending committed migrations and directs the operator to the offline command. For a current database, it opens the long-lived `aiosqlite` connection and executes `PRAGMA foreign_keys = ON`; this must remain enabled for the documented cascades and `SET NULL` behavior.
+
+The committed migrations are the schema source of truth. Applied migration files are immutable: never edit or delete them. Add schema changes as the next numbered migration and validate them against a new temporary database. Tests do not use `db/bot.db`.
 
 Model classes in `db/models/` are thin asynchronous query collections. They commit writes themselves and normally return positional SQLite rows rather than named domain objects. Consult [Data model](data-model.md) before changing query columns or destructuring call sites.
 

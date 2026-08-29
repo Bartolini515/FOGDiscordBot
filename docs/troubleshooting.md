@@ -50,14 +50,21 @@ CI never starts `main.py`, reads `.env`, `configuration.json`, or `db/bot.db`, a
 
 ## Migration failures
 
-`Database.connect()` runs yoyo before opening the long-lived application connection. Check:
+Migrations are an offline deployment phase. Run the explicit command against the intended database before starting the bot:
+
+```text
+python -m scripts.migrate --database <path>
+python -m scripts.migrate --database <path> --check
+```
+
+`--check` makes no schema changes and exits nonzero when committed migrations are pending. `Database.connect()` never applies migrations; it refuses a database that is not current. Check:
 
 - the process can write the database directory;
 - the migration table and error mention in the log;
 - no applied `001`/`002` file was edited;
 - the same database is not being written by another bot process.
 
-Reproduce schema changes only with a new database in a temporary directory. Do not point tests, experiments, or repair commands at `db/bot.db`. Never remove yoyo history or edit an applied migration to force a retry; add a new forward migration.
+Reproduce schema changes only with a new database in a temporary directory. Do not point tests, experiments, or repair commands at `db/bot.db`. Never remove yoyo history or edit an applied migration file to force a retry; applied migration files are immutable, so add a new forward migration instead.
 
 ## Commands are missing
 
