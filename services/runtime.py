@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, BinaryIO, Protocol
 
 
 class CogLoader(Protocol):
@@ -127,31 +127,55 @@ def _fsync_directory(directory: Path) -> None:
 
 
 class InstanceLock:
-    """Non-blocking, dependency-free exclusive lock backed by one file."""
+    """Non-blocking, dependency-free advisory lock tied to an open file handle."""
 
     def __init__(self, path: Path):
         self.path = path
-        self._descriptor: int | None = None
+        self._file: BinaryIO | None = None
 
     def acquire(self) -> None:
         """Acquire this lock immediately or raise if another holder exists."""
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = self.path.open("a+b")
+        lock_file.seek(0, os.SEEK_END)
+        if lock_file.tell() == 0:
+            lock_file.write(b"0")
+            lock_file.flush()
+            os.fsync(lock_file.fileno())
+        lock_file.seek(0)
         try:
-            self._descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError as exc:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
+        except OSError as exc:
+            lock_file.close()
             raise InstanceLockError(f"Runtime instance lock is already held: {self.path}") from exc
-        os.write(self._descriptor, str(os.getpid()).encode("ascii"))
-        os.fsync(self._descriptor)
+        self._file = lock_file
 
     def release(self) -> None:
         """Release an acquired lock; repeated release is safe."""
 
-        if self._descriptor is None:
+        if self._file is None:
             return
-        os.close(self._descriptor)
-        self._descriptor = None
-        self.path.unlink(missing_ok=True)
+        try:
+            self._file.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
+        finally:
+            self._file.close()
+            self._file = None
 
 
 def release_sha_from_file(path: Path) -> str:
@@ -180,9 +204,15 @@ class ReadinessRecord:
     """Own the atomically persisted readiness state for one bot generation."""
 
     def __init__(self, runtime_dir: Path, release_sha: str, *, generation: str | None = None):
+        if release_sha != "unknown" and not re.fullmatch(r"[0-9a-f]{40}", release_sha):
+            raise ValueError("release_sha must be a lowercase 40-character SHA or 'unknown'")
+        try:
+            parsed_generation = uuid.UUID(generation) if generation is not None else uuid.uuid4()
+        except ValueError as exc:
+            raise ValueError("generation must be a valid UUID") from exc
         self.path = runtime_dir / READINESS_FILENAME
         self.release_sha = release_sha
-        self.generation = generation or str(uuid.uuid4())
+        self.generation = str(parsed_generation)
         self.boot_id = _boot_id()
         self._ready_at: str | None = None
 
@@ -202,6 +232,7 @@ class ReadinessRecord:
     def invalidate(self) -> None:
         """Remove readiness idempotently when Discord connectivity is lost."""
 
+        self._ready_at = None
         self.path.unlink(missing_ok=True)
         _fsync_directory(self.path.parent)
 

@@ -54,6 +54,7 @@ class MyBot(commands.Bot):
         self.honeypot_system = configuration["honeypot_system"]
         self._autosave_task_handle: asyncio.Task[None] | None = None
         self._heartbeat_task_handle: asyncio.Task[None] | None = None
+        self._shutdown_errors: list[Exception] = []
 
     async def _load_cogs(self) -> None:
         await load_cogs(self, self.logger)
@@ -117,18 +118,30 @@ class MyBot(commands.Bot):
                     await task
                 except asyncio.CancelledError:
                     pass
+                except Exception as exc:
+                    self._shutdown_errors.append(exc)
+
+    def _record_shutdown_error(self, error: Exception) -> None:
+        self._shutdown_errors.append(error)
+        self.logger.error("Shutdown operation failed: %s", error)
 
     async def close(self) -> None:
         self.readiness.invalidate()
         await self._cancel_background_tasks()
         try:
             await self._save_configuration()
+        except Exception as exc:
+            self._record_shutdown_error(exc)
         finally:
             try:
                 await self.db.close()
+            except Exception as exc:
+                self._record_shutdown_error(exc)
             finally:
                 try:
                     await super().close()
+                except Exception as exc:
+                    self._record_shutdown_error(exc)
                 finally:
                     self.instance_lock.release()
 
