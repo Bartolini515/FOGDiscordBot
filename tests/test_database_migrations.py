@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from db.database import Database, PendingMigrationsError, apply_committed_migrations, pending_migration_ids
+from scripts import migrate
 
 
 def test_empty_database_lists_all_committed_migrations_without_creating_schema(tmp_path: Path):
@@ -75,6 +77,37 @@ def test_migrate_cli_check_is_read_only_when_migrations_are_pending(tmp_path: Pa
     assert result.returncode != 0
     assert "Pending migrations: 001_init, 002_warns" in result.stdout
     assert not path.exists()
+
+
+def test_migrate_cli_check_reports_a_corrupt_database_without_a_traceback(tmp_path: Path):
+    path = tmp_path / "corrupt.sqlite3"
+    path.write_bytes(b"not a SQLite database")
+
+    result = _run_migrate_cli(tmp_path, "--database", str(path), "--check")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith("Migration failed: ")
+    assert "Traceback" not in result.stderr
+    assert "not a SQLite database" not in result.stderr
+
+
+def test_migrate_cli_reports_a_post_apply_recheck_failure(tmp_path: Path, monkeypatch, capsys):
+    path = tmp_path / "recheck.sqlite3"
+    monkeypatch.setattr(sys, "argv", ["migrate", "--database", str(path)])
+    monkeypatch.setattr(migrate, "apply_committed_migrations", lambda *_: ["001_init"])
+
+    def raise_database_error(*_: object) -> list[str]:
+        raise sqlite3.DatabaseError("database recheck failed")
+
+    monkeypatch.setattr(migrate, "pending_migration_ids", raise_database_error)
+
+    assert migrate.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("Migration failed: ")
+    assert "Traceback" not in captured.err
+    assert "database recheck failed" not in captured.err
 
 
 def test_migrate_cli_applies_then_checks_migrations(tmp_path: Path):

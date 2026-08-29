@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
 from db.database import apply_committed_migrations, pending_migration_ids
 
@@ -20,21 +21,21 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> int:
     """Check or apply migrations for the database selected by the operator."""
     arguments = parse_arguments()
-    if arguments.check:
-        pending = pending_migration_ids(arguments.database, arguments.migrations)
-        if pending:
-            print(f"Pending migrations: {', '.join(pending)}")
-            return 1
-        print("No pending migrations.")
-        return 0
-
     try:
+        if arguments.check:
+            pending = pending_migration_ids(arguments.database, arguments.migrations)
+            if pending:
+                print(f"Pending migrations: {', '.join(pending)}")
+                return 1
+            print("No pending migrations.")
+            return 0
+
         applied = apply_committed_migrations(arguments.database, arguments.migrations)
-    except Exception as error:
-        print(f"Migration failed: {error}")
+        pending = pending_migration_ids(arguments.database, arguments.migrations)
+    except Exception:
+        print("Migration failed: unable to inspect or apply the selected database.", file=sys.stderr)
         return 1
 
-    pending = pending_migration_ids(arguments.database, arguments.migrations)
     if pending:
         print(f"Pending migrations: {', '.join(pending)}")
         return 1
