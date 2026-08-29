@@ -12,7 +12,7 @@ Keep code, identifiers, comments, and repository documentation in English unless
 - `configuration.py` and `configuration.example.json` define the safe configuration bootstrap and validated top-level structure.
 - `Cogs/` owns Discord commands, listeners, scheduled tasks, and persistent component registration.
 - `db/migrations/` is the immutable SQLite schema history.
-- `db/models.py` defines current SQL query and positional tuple contracts.
+- `db/models/` defines current SQL query and positional tuple contracts.
 - `ticket/` defines ticket categories, handlers, and views.
 - `docs/architecture.md` and `docs/domain/missions.md` describe runtime/domain flows.
 - `docs/data-model.md`, `docs/configuration.md`, and `docs/modules.md` catalog data, configuration, and interfaces.
