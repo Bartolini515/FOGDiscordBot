@@ -185,7 +185,7 @@ def release_sha_from_file(path: Path) -> str:
         value = path.read_text(encoding="utf-8").strip()
     except OSError:
         return "unknown"
-    return value if re.fullmatch(r"[0-9a-fA-F]{40}", value) else "unknown"
+    return value.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", value) else "unknown"
 
 
 def _boot_id() -> str:

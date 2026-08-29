@@ -11,7 +11,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.runtime import InstanceLock, InstanceLockError, ReadinessRecord, RuntimePathError, RuntimePaths, save_runtime_configuration
+from services.runtime import (
+    InstanceLock,
+    InstanceLockError,
+    ReadinessRecord,
+    RuntimePathError,
+    RuntimePaths,
+    release_sha_from_file,
+    save_runtime_configuration,
+)
 
 
 def test_runtime_paths_resolve_literal_defaults_from_an_injected_local_base(tmp_path: Path):
@@ -55,6 +63,15 @@ def test_runtime_paths_reject_relative_production_overrides():
 
     with pytest.raises(RuntimePathError, match="FOGBOT_DB_PATH"):
         RuntimePaths.from_environment({"FOGBOT_DB_PATH": str(Path("db") / "bot.db")})
+
+
+def test_release_sha_file_normalizes_valid_uppercase_sha_to_lowercase(tmp_path: Path):
+    """Catch a startup regression where a valid uppercase release file conflicts with readiness validation."""
+
+    release_file = tmp_path / "RELEASE_SHA"
+    release_file.write_text("A" * 40, encoding="utf-8")
+
+    assert release_sha_from_file(release_file) == "a" * 40
 
 
 def test_instance_lock_excludes_a_second_holder_and_releases(tmp_path: Path):
@@ -232,7 +249,12 @@ async def test_close_attempts_database_and_discord_shutdown_after_a_failed_backg
     paths = RuntimePaths.from_environment({}, development_base=tmp_path)
     lock = InstanceLock(paths.instance_lock)
     lock.acquire()
-    bot = main.MyBot(config_path and json.loads(config_path.read_text(encoding="utf-8")), paths, logging.getLogger("runtime-contract"), False, lock)
+    logger = logging.getLogger(f"runtime-contract-{id(tmp_path)}")
+    log_path = tmp_path / "shutdown.log"
+    log_handler = logging.FileHandler(log_path, encoding="utf-8")
+    logger.addHandler(log_handler)
+    logger.setLevel(logging.ERROR)
+    bot = main.MyBot(config_path and json.loads(config_path.read_text(encoding="utf-8")), paths, logger, False, lock)
     database_closed = tmp_path / "database-closed"
 
     class LocalDatabase:
@@ -246,12 +268,17 @@ async def test_close_attempts_database_and_discord_shutdown_after_a_failed_backg
     bot._autosave_task_handle = asyncio.create_task(failed_background_task())
     bot._heartbeat_task_handle = asyncio.create_task(asyncio.sleep(3600))
     await asyncio.sleep(0)
-    await bot.close()
+    try:
+        await bot.close()
+    finally:
+        logger.removeHandler(log_handler)
+        log_handler.close()
 
     assert database_closed.read_text(encoding="utf-8") == "closed"
     assert bot.is_closed()
     assert bot._heartbeat_task_handle.cancelled()
     assert [str(error) for error in bot._shutdown_errors] == ["autosave failed"]
+    assert "autosave failed" in log_path.read_text(encoding="utf-8")
     replacement = InstanceLock(paths.instance_lock)
     replacement.acquire()
     replacement.release()

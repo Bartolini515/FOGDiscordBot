@@ -119,7 +119,7 @@ class MyBot(commands.Bot):
                 except asyncio.CancelledError:
                     pass
                 except Exception as exc:
-                    self._shutdown_errors.append(exc)
+                    self._record_shutdown_error(exc)
 
     def _record_shutdown_error(self, error: Exception) -> None:
         self._shutdown_errors.append(error)
