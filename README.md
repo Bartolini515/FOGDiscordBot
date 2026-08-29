@@ -58,6 +58,8 @@ pipenv run typecheck
 pipenv run test
 ```
 
+GitHub Actions runs the same quality contract for pull requests targeting `main` and pushes to `main`. The [CI workflow](.github/workflows/ci.yml) has one stable `quality` job that verifies the lockfile, installs development dependencies, runs `pipenv run check`, checks the event diff for whitespace errors, and rejects tracked-file changes made by checks. It does not load `.env`, use `configuration.json` or `db/bot.db`, start `main.py`, or connect to Discord.
+
 Tests use temporary migrated SQLite databases. They do not read `db/bot.db`, require a token, or connect to Discord.
 
 ## Architecture at a glance
@@ -90,6 +92,6 @@ See [Architecture](docs/architecture.md) and [Mission domain](docs/domain/missio
 
 ## Known boundaries
 
-There is currently no CI pipeline and no automated Discord integration suite. The first mandatory mypy scope covers configuration, database, ticket, and script code rather than cogs. Time values are naive and server-local, models return positional tuples, and several historical schema/behavior limitations are recorded in the technical documents.
+The CI pipeline runs the offline quality checks, but there is no automated Discord integration suite. The first mandatory mypy scope covers configuration, database, ticket, and script code rather than cogs. Time values are naive and server-local, models return positional tuples, and several historical schema/behavior limitations are recorded in the technical documents.
 
 Production deployment and service restart procedures are intentionally outside this repository guide. Any write to Discord, real configuration/database, systemd, or production requires separate operator approval.

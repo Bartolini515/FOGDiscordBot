@@ -19,6 +19,7 @@ Never test startup using the production token. The automated suite does not requ
 Prepare the environment from the committed lockfile:
 
 ```text
+pipenv verify
 pipenv sync --dev
 pipenv run check
 ```
@@ -31,6 +32,21 @@ The combined check executes all four stages even when an earlier stage fails:
 4. pytest.
 
 Run the corresponding `pipenv run lint`, `pipenv run typecheck`, or `pipenv run test` command to focus on a failing stage. The authoritative interpreter target is Python 3.12.
+
+## GitHub Actions `quality` failures
+
+The `CI` workflow runs the offline checks for every pull request targeting `main` and every push to `main`. Reproduce a failed job locally in this order:
+
+```text
+pipenv verify
+pipenv sync --dev
+pipenv run check
+git diff --check
+```
+
+`pipenv verify` reports that `Pipfile.lock` does not match `Pipfile`; regenerate the lockfile locally and commit the resulting pair. A synchronization failure means a locked dependency could not be installed. Failures in `pipenv run check` identify one of the four local stages: `pip check`, Ruff, mypy, or pytest. The workflow's whitespace step checks only the pull request range or pushed commit range, while the final cleanliness step fails if any tracked file was modified by a check. Untracked ignored caches created by pytest, Ruff, or mypy are allowed.
+
+CI never starts `main.py`, reads `.env`, `configuration.json`, or `db/bot.db`, and does not contact Discord. A failure involving those boundaries must be reproduced with a safe temporary configuration or database rather than by adding production data to the workflow.
 
 ## Migration failures
 
@@ -112,7 +128,7 @@ Do not run `start`, `stop`, `restart`, `enable`, `disable`, `daemon-reload`, dep
 
 ## Known limitations
 
-- There is no CI configuration; `pipenv run check` is local.
+- The `CI` workflow covers offline quality checks; `pipenv run check` remains the local source of truth.
 - No automated test connects to Discord or validates real integration permissions/persistent views.
 - The initial mypy scope excludes `Cogs/`.
 - Time handling is server-local and naive.
