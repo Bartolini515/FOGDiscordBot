@@ -504,6 +504,43 @@ def test_metadata_reader_redacts_unexpected_json_value_errors(tmp_path, monkeypa
     assert "untrusted parser detail" not in str(error.value)
 
 
+def test_metadata_reader_uses_nonblocking_posix_descriptor_flags(tmp_path, monkeypatch):
+    """Catch a POSIX reader regression that can block on a FIFO before fstat rejects it."""
+    metadata = _metadata_module()
+    configuration_path = tmp_path / "configuration.json"
+    configuration_path.write_text("{}", encoding="utf-8")
+    observed_flags = []
+
+    def record_open(path, flags):
+        observed_flags.append(flags)
+        raise OSError("test open failure")
+
+    monkeypatch.setattr(metadata.os, "name", "posix")
+    monkeypatch.setattr(metadata.os, "O_NOFOLLOW", 1, raising=False)
+    monkeypatch.setattr(metadata.os, "O_CLOEXEC", 2, raising=False)
+    monkeypatch.setattr(metadata.os, "O_NONBLOCK", 4, raising=False)
+    monkeypatch.setattr(metadata.os, "open", record_open)
+
+    with pytest.raises(metadata.MetadataError, match="^configuration_unavailable$"):
+        metadata.ProductionMetadataReader(configuration_path).read()
+
+    assert observed_flags == [metadata.os.O_RDONLY | 1 | 2 | 4]
+
+
+@pytest.mark.skipif(os.name != "posix" or not hasattr(os, "mkfifo"), reason="FIFO regression requires POSIX mkfifo")
+def test_metadata_reader_rejects_fifo_without_waiting_for_a_writer(tmp_path):
+    """Catch a POSIX current-command regression that blocks before rejecting non-regular input."""
+    metadata = _metadata_module()
+    fifo_path = tmp_path / "configuration.fifo"
+    try:
+        os.mkfifo(fifo_path)
+    except OSError as error:
+        pytest.skip(f"FIFO creation is unavailable: {error.errno}")
+
+    with pytest.raises(metadata.MetadataError, match="^configuration_unavailable$"):
+        metadata.ProductionMetadataReader(fifo_path).read()
+
+
 def test_repository_does_not_contain_a_github_cd_workflow():
     """Catch scope drift that reintroduces prohibited automatic deployment automation."""
     from pathlib import Path

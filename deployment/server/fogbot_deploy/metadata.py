@@ -86,9 +86,10 @@ def _open_configuration_descriptor(configuration_path: Path) -> int:
     if os.name == "posix":
         no_follow = getattr(os, "O_NOFOLLOW", None)
         close_on_exec = getattr(os, "O_CLOEXEC", None)
-        if no_follow is None or close_on_exec is None:
+        non_blocking = getattr(os, "O_NONBLOCK", None)
+        if no_follow is None or close_on_exec is None or non_blocking is None:
             raise MetadataError("configuration_unavailable")
-        return os.open(configuration_path, os.O_RDONLY | no_follow | close_on_exec)
+        return os.open(configuration_path, os.O_RDONLY | no_follow | close_on_exec | non_blocking)
 
     if os.name == "nt":
         initial_status = configuration_path.lstat()
