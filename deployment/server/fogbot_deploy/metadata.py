@@ -74,7 +74,7 @@ class ProductionMetadataReader:
             if not isinstance(version, str) or not isinstance(last_updated, str):
                 raise MetadataError("configuration_unavailable")
             return CurrentMetadata(version, last_updated)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, MetadataError) as error:
+        except (OSError, UnicodeDecodeError, ValueError) as error:
             raise MetadataError("configuration_unavailable") from error
         finally:
             if descriptor is not None:

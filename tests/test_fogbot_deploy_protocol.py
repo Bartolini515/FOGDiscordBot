@@ -485,6 +485,25 @@ def test_metadata_reader_rejects_path_replacement_before_opening_descriptor(tmp_
         metadata.ProductionMetadataReader(configuration_path).read()
 
 
+def test_metadata_reader_redacts_unexpected_json_value_errors(tmp_path, monkeypatch):
+    """Catch a JSON-boundary regression that leaks an unexpected parser ValueError."""
+    metadata = _metadata_module()
+    configuration_path = tmp_path / "configuration.json"
+    configuration_path.write_text(
+        json.dumps({"technical_info": {"version": "1.2.11", "last_updated": "2026-08-20"}}), encoding="utf-8"
+    )
+
+    def raise_parser_value_error(payload):
+        raise ValueError("untrusted parser detail")
+
+    monkeypatch.setattr(metadata.json, "loads", raise_parser_value_error)
+
+    with pytest.raises(metadata.MetadataError, match="^configuration_unavailable$") as error:
+        metadata.ProductionMetadataReader(configuration_path).read()
+
+    assert "untrusted parser detail" not in str(error.value)
+
+
 def test_repository_does_not_contain_a_github_cd_workflow():
     """Catch scope drift that reintroduces prohibited automatic deployment automation."""
     from pathlib import Path
