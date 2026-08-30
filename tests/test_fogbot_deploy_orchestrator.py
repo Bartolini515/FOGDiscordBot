@@ -28,7 +28,7 @@ def _record(tmp_path: Path):
     now = datetime(2026, 8, 30, 12, tzinfo=UTC)
     verified = verifier.VerifiedRun(repository_id=22, run_id=71, run_attempt=2, sha=SHA, verified_at=now)
     record = state.OperationRecord.authorized(verified, "a" * 32, "1.2.11")
-    return record, state.OperationStore(tmp_path / "operations")
+    return record, state.OperationStore(tmp_path / "state" / "operations")
 
 
 def _database(path: Path) -> None:
@@ -54,6 +54,9 @@ def _layout(tmp_path: Path):
     database = shared / "bot.db"
     if not database.exists():
         _database(database)
+    marker = state / "release.sha"
+    if not marker.exists():
+        marker.write_text("a" * 40 + "\n", encoding="ascii")
     return module.ServerLayout(
         releases=tmp_path / "releases",
         shared=shared,
@@ -63,7 +66,7 @@ def _layout(tmp_path: Path):
         configuration=configuration,
         database=database,
         readiness=state / "readiness.json",
-        sha_marker=state / "release.sha",
+        sha_marker=marker,
     )
 
 
@@ -79,6 +82,7 @@ class Fakes:
     ready: bool = True
     migrated: bool = False
     switched: str = "previous-release"
+    release_root: Path | None = None
 
     def dependencies(self):
         module = self.module
@@ -94,7 +98,10 @@ class Fakes:
                 events.append(f"prepare:{sha}")
                 if failure == "prepare":
                     raise module.DeploymentFailure("release_preparation_failed")
-                return module.ReleaseIdentity(sha=sha, release_id="release-a")
+                assert self_outer.release_root is not None
+                path = self_outer.release_root / sha
+                path.mkdir(exist_ok=True)
+                return module.ReleaseIdentity(sha=sha, release_id=sha, path=path)
 
             def verify(self, release):
                 events.append("verify-release")
@@ -153,7 +160,7 @@ class Fakes:
                 self_outer.migrated = True
                 return True
 
-            def validate(self, database, timeout_seconds):
+            def validate(self, release, database, timeout_seconds):
                 events.append("validate-migrations")
                 return failure != "migration-validation"
 
@@ -205,8 +212,9 @@ def _run(tmp_path: Path, *, failure: str | None = None, **changes):
     module = _module()
     record, store = _record(tmp_path)
     store.create_or_read(record)
-    fakes = Fakes(module=module, events=[], failure=failure, **changes)
-    orchestrator = module.DeploymentOrchestrator(_layout(tmp_path), store, fakes.dependencies())
+    layout = _layout(tmp_path)
+    fakes = Fakes(module=module, events=[], failure=failure, release_root=layout.releases, **changes)
+    orchestrator = module.DeploymentOrchestrator(layout, store, fakes.dependencies())
     return orchestrator.run(record.operation_id), store, fakes, _layout
 
 
@@ -225,7 +233,7 @@ def test_successful_transaction_uses_exact_sha_redacts_result_and_updates_only_t
     assert fakes.events == [
         f"existing:{SHA}", "service-status", f"prepare:{SHA}", "verify-release", "preflight-no-network", "revalidate",
         "stop", "service-status", "process-free", "instance-lock", "read-current", "rehearse", "apply",
-        "validate-migrations", f"switch:{SHA}", "start", "service-status", "identity", f"observe:{SHA}",
+        "validate-migrations", "read-current", f"switch:{SHA}", "start", "service-status", "identity", f"observe:{SHA}",
     ]
     assert str(make_layout(tmp_path).shared) not in outcome.diagnostic_code
 
@@ -243,9 +251,8 @@ def test_layout_rejects_relative_and_traversal_paths_before_any_preparation(tmp_
     store.create_or_read(record)
     fakes = Fakes(module=module, events=[])
 
-    outcome = module.DeploymentOrchestrator(unsafe, store, fakes.dependencies()).run(record.operation_id)
-
-    assert outcome == module.DeploymentOutcome(False, "layout_invalid")
+    with pytest.raises(module.DeploymentFailure, match="^layout_invalid$"):
+        module.DeploymentOrchestrator(unsafe, store, fakes.dependencies())
     assert fakes.events == []
 
 
@@ -340,19 +347,21 @@ def test_fixed_argv_adapters_keep_systemctl_git_pipenv_and_migration_calls_shell
         def run(self, executable, argv, environment, cwd, timeout_seconds):
             self.calls.append((executable, argv, environment, cwd, timeout_seconds))
             transaction = importlib.import_module("deployment.server.fogbot_deploy.transaction")
-            return transaction.RawCommandResult(0, b"", b"")
+            return transaction.RawCommandResult(0, SHA.encode(), b"")
 
     runner = Runner()
-    adapters = module.FixedArgAdapters(runner, tmp_path)
+    layout = _layout(tmp_path)
+    adapters = module.FixedArgAdapters(layout, runner)
     adapters.service.stop(9)
-    adapters.preparer.prepare(SHA, 9)
+    release = adapters.preparer.prepare(SHA, 9)
     database = PurePosixPath("/var/lib/fogbot/shared/bot.db")
-    adapters.migrations.apply(module.ReleaseIdentity(SHA, "release-a"), database, 9)
+    adapters.migrations.apply(release, database, 9)
 
     assert [call[1] for call in runner.calls] == [
         ("stop", "fogbot.service"),
-        ("fetch", "--depth", "1", "origin", SHA),
-        ("run", "yoyo", "apply", "--batch", "--database", str(database)),
+        ("worktree", "add", "--detach", layout.releases.joinpath(SHA).as_posix(), SHA),
+        ("-C", layout.releases.joinpath(SHA).as_posix(), "rev-parse", "HEAD"),
+        ("-m", "scripts.migrate", "--database", str(database), "--migrations", layout.releases.joinpath(SHA, "db", "migrations").as_posix()),
     ]
     assert all(isinstance(call[1], tuple) for call in runner.calls)
 
@@ -370,7 +379,7 @@ def test_atomic_symlink_switcher_only_targets_verified_release_directories(tmp_p
         current.symlink_to(releases / old_sha, target_is_directory=True)
     except OSError as error:
         pytest.skip(f"symlink creation is unavailable: {error.winerror}")
-    switcher.switch(module.ReleaseIdentity(new_sha, new_sha))
+    switcher.switch(module.ReleaseIdentity(new_sha, new_sha, releases / new_sha))
 
     assert switcher.current_release_id() == new_sha
     switcher.restore(old_sha)

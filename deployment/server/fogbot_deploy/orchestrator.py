@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import stat
 import tempfile
+import time
 from typing import Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -32,6 +33,9 @@ from .transaction import (
     execute_command,
     update_configuration_metadata,
     validate_sqlite_backup,
+    _read_regular_bytes,
+    _same_file,
+    evaluate_readiness,
 )
 
 
@@ -53,10 +57,18 @@ class ReleaseIdentity:
 
     sha: str
     release_id: str
+    path: Path
 
     def __post_init__(self) -> None:
-        if not SHA_PATTERN.fullmatch(self.sha) or not self.release_id or len(self.release_id) > 128:
-            raise DeploymentFailure("release_preparation_failed")
+        if (
+            not SHA_PATTERN.fullmatch(self.sha)
+            or self.release_id != self.sha
+            or not isinstance(self.path, Path)
+            or not self.path.is_absolute()
+            or self.path.name != self.sha
+        ):
+            raise DeploymentFailure("release_identity_invalid")
+        object.__setattr__(self, "path", self.path.resolve(strict=False))
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +146,7 @@ class ProcessInspector(Protocol):
 class MigrationRunner(Protocol):
     def rehearse(self, release: ReleaseIdentity, database: Path, timeout_seconds: int) -> bool: ...
     def apply(self, release: ReleaseIdentity, database: Path, timeout_seconds: int) -> bool: ...
-    def validate(self, database: Path, timeout_seconds: int) -> bool: ...
+    def validate(self, release: ReleaseIdentity, database: Path, timeout_seconds: int) -> bool: ...
 
 
 class ReleaseSwitcher(Protocol):
@@ -170,6 +182,7 @@ class DeploymentDependencies:
 @dataclass(frozen=True, slots=True)
 class _Snapshot:
     previous_release: str
+    previous_marker_sha: str
     database: BackupIdentity
     configuration: BackupIdentity
 
@@ -178,6 +191,9 @@ class DeploymentOrchestrator:
     """Run the manual transaction while holding one lock until a durable final state."""
 
     def __init__(self, layout: ServerLayout, store: OperationStore, dependencies: DeploymentDependencies, policy: HealthPolicy = HealthPolicy()):
+        layout.validate()
+        if store.directory.resolve(strict=False) != layout.operations.resolve(strict=False):
+            raise DeploymentFailure("layout_invalid")
         self._layout = layout
         self._store = store
         self._dependencies = dependencies
@@ -194,6 +210,8 @@ class DeploymentOrchestrator:
                 return self._run_locked(record)
         except TransactionError as error:
             return DeploymentOutcome(False, _safe_code(str(error), "deployment_in_progress"))
+        except Exception:
+            return DeploymentOutcome(False, "preparation_failed")
 
     def _run_locked(self, record: OperationRecord) -> DeploymentOutcome:
         release: ReleaseIdentity | None = None
@@ -211,43 +229,50 @@ class DeploymentOrchestrator:
             if not self._dependencies.service.is_active(self._policy.stop_timeout_seconds):
                 raise DeploymentFailure("service_state_invalid")
             release = self._dependencies.preparer.prepare(record.target["sha"], self._policy.startup_timeout_seconds)
-            if release.sha != record.target["sha"] or not self._dependencies.preparer.verify(release):
+            if not self._valid_release(release, record.target["sha"]) or not self._dependencies.preparer.verify(release):
                 raise DeploymentFailure("release_identity_invalid")
             if not self._dependencies.preparer.preflight(release, self._policy.startup_timeout_seconds):
                 raise DeploymentFailure("preflight_failed")
             record = self._persist(record, "ready_to_stop", "pending")
             self._revalidate(record)
-            self._dependencies.service.stop(self._policy.stop_timeout_seconds)
+            record = self._persist(record, "stopping", "pending")
+            try:
+                self._dependencies.service.stop(self._policy.stop_timeout_seconds)
+            except (DeploymentFailure, OSError, ValueError, TypeError):
+                if not self._dependencies.service.is_active(self._policy.stop_timeout_seconds):
+                    stopped = True
+                    record = self._persist(record, "stopped", "pending")
+                raise DeploymentFailure("stop_failed") from None
             stopped = True
+            record = self._persist(record, "stopped", "pending")
             if self._dependencies.service.is_active(self._policy.stop_timeout_seconds):
                 raise DeploymentFailure("stop_failed")
             if not self._dependencies.processes.no_bot_process(self._policy.stop_timeout_seconds):
                 raise DeploymentFailure("exclusion_failed")
             if not self._dependencies.processes.acquire_instance_lock(self._policy.stop_timeout_seconds):
                 raise DeploymentFailure("exclusion_failed")
-            record = self._persist(record, "stopped", "pending")
             snapshot = self._backup(record)
             record = self._persist(
                 record,
                 "backed_up",
                 "pending",
                 previous_release=snapshot.previous_release,
+                previous_marker_sha=snapshot.previous_marker_sha,
                 backup_release_id=snapshot.configuration.filename,
                 backup_database_id=snapshot.database.filename,
             )
             warsaw_date = self._warsaw_date()
             update_configuration_metadata(self._layout.configuration, version=record.target["target_version"], last_updated=warsaw_date)
             rehearsal_database = self._layout.backups / f"{record.operation_id}.rehearsal.sqlite"
-            _restore_file(self._layout.backups / snapshot.database.filename, rehearsal_database, validate_sqlite_backup)
+            _restore_file(self._layout.backups / snapshot.database.filename, rehearsal_database, validate_sqlite_backup, snapshot.database)
             if not self._dependencies.migrations.rehearse(release, rehearsal_database, self._policy.stop_timeout_seconds):
                 raise DeploymentFailure("migration_failed")
             if not self._dependencies.migrations.apply(release, self._layout.database, self._policy.stop_timeout_seconds):
                 raise DeploymentFailure("migration_failed")
-            if not self._dependencies.migrations.validate(self._layout.database, self._policy.stop_timeout_seconds):
+            if not self._dependencies.migrations.validate(release, self._layout.database, self._policy.stop_timeout_seconds):
                 raise DeploymentFailure("migration_failed")
             record = self._persist(record, "migrated", "pending", migration_applied=True)
-            self._dependencies.switcher.switch(release)
-            _write_sha_marker(self._layout.sha_marker, release.sha)
+            switch_release_and_marker(self._dependencies.switcher, self._layout.sha_marker, release)
             record = self._persist(record, "switched", "pending")
             record = self._persist(record, "starting", "pending")
             # A failed start command may still have spawned a process. Treat the
@@ -260,13 +285,13 @@ class DeploymentOrchestrator:
             if process is None or not self._dependencies.health.observe(release.sha, process, self._policy):
                 raise DeploymentFailure("health_check_failed")
             record = self._persist(record, "health_check", "pending")
-            self._persist(record, "succeeded", "completed", result="success")
+            self._persist(record, "succeeded", "completed", result="success", deployment_date=warsaw_date, deployed_release_id=release.release_id)
             return DeploymentOutcome(True, "completed")
         except DeploymentFailure as error:
             return self._recover(record, release, snapshot, stopped, new_process_started, _safe_code(str(error), "preparation_failed"))
         except TransactionError as error:
             return self._recover(record, release, snapshot, stopped, new_process_started, _safe_code(str(error), "preparation_failed"))
-        except (OSError, ValueError, TypeError):
+        except Exception:
             return self._recover(record, release, snapshot, stopped, new_process_started, "preparation_failed")
 
     def _validate_target(self, record: OperationRecord) -> None:
@@ -279,6 +304,15 @@ class DeploymentOrchestrator:
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             raise DeploymentFailure("target_invalid") from None
+
+    def _valid_release(self, release: ReleaseIdentity, sha: str) -> bool:
+        try:
+            if release.sha != sha or release.release_id != sha or release.path != (self._layout.releases / sha).resolve(strict=False):
+                return False
+            status = release.path.lstat()
+            return stat.S_ISDIR(status.st_mode) and not stat.S_ISLNK(status.st_mode)
+        except OSError:
+            return False
 
     def _assert_capacity(self) -> None:
         try:
@@ -310,13 +344,14 @@ class DeploymentOrchestrator:
     def _backup(self, record: OperationRecord) -> _Snapshot:
         try:
             previous_release = self._dependencies.switcher.current_release_id()
+            previous_marker_sha = _read_sha_marker(self._layout.sha_marker)
             if not previous_release or len(previous_release) > 128:
                 raise ValueError
             database = backup_sqlite_database(self._layout.database, self._layout.backups / f"{record.operation_id}.sqlite")
             configuration = _backup_configuration(
                 self._layout.configuration, self._layout.backups / f"{record.operation_id}.configuration.json"
             )
-            return _Snapshot(previous_release, database, configuration)
+            return _Snapshot(previous_release, previous_marker_sha, database, configuration)
         except (OSError, ValueError, TransactionError):
             raise DeploymentFailure("backup_failed") from None
 
@@ -358,12 +393,23 @@ class DeploymentOrchestrator:
             self._persist_final(record, "manual_intervention", "manual_intervention_required")
             return DeploymentOutcome(False, "manual_intervention_required")
         if snapshot is None:
+            try:
+                if not self._dependencies.service.is_active(self._policy.stop_timeout_seconds):
+                    self._dependencies.service.start(self._policy.startup_timeout_seconds)
+                if not self._dependencies.service.is_active(self._policy.startup_timeout_seconds):
+                    raise DeploymentFailure("start_failed")
+            except (DeploymentFailure, OSError, ValueError, TypeError):
+                self._persist_final(record, "manual_intervention", "manual_intervention_required")
+                return DeploymentOutcome(False, "manual_intervention_required")
             self._persist_final(record, "failed", "recovered")
             return DeploymentOutcome(False, "recovered")
         try:
-            _restore_file(self._layout.backups / snapshot.configuration.filename, self._layout.configuration, _validate_configuration)
-            _restore_file(self._layout.backups / snapshot.database.filename, self._layout.database, validate_sqlite_backup)
+            _restore_file(self._layout.backups / snapshot.configuration.filename, self._layout.configuration, _validate_configuration, snapshot.configuration)
+            _restore_file(self._layout.backups / snapshot.database.filename, self._layout.database, validate_sqlite_backup, snapshot.database)
             self._dependencies.switcher.restore(snapshot.previous_release)
+            _write_sha_marker(self._layout.sha_marker, snapshot.previous_marker_sha)
+            if self._dependencies.switcher.current_release_id() != snapshot.previous_release or _read_sha_marker(self._layout.sha_marker) != snapshot.previous_marker_sha:
+                raise ValueError
         except (DeploymentFailure, TransactionError, OSError, ValueError, TypeError):
             self._persist_final(record, "manual_intervention", "manual_intervention_required")
             return DeploymentOutcome(False, "manual_intervention_required")
@@ -390,43 +436,102 @@ class _FixedService:
 
 
 class _FixedPreparer:
-    def __init__(self, runner: CommandRunner, cwd: Path): self._runner, self._cwd = runner, cwd
-    def existing_identity(self, sha: str) -> str | None: return None
+    def __init__(self, layout: ServerLayout, runner: CommandRunner): self._layout, self._runner = layout, runner
+    def existing_identity(self, sha: str) -> str | None:
+        path = self._layout.releases / sha
+        if not path.is_dir() or path.is_symlink():
+            return None
+        return sha if self.verify(ReleaseIdentity(sha, sha, path)) else "conflict"
     def prepare(self, sha: str, timeout_seconds: int) -> ReleaseIdentity:
-        _require(_fixed(self._runner, "/usr/bin/git", ("fetch", "--depth", "1", "origin", sha), self._cwd, timeout_seconds), "release_preparation_failed")
-        return ReleaseIdentity(sha, sha)
+        path = self._layout.releases / sha
+        if path.exists():
+            if self.existing_identity(sha) == sha:
+                return ReleaseIdentity(sha, sha, path)
+            raise DeploymentFailure("release_conflict")
+        _require(_fixed(self._runner, "/usr/bin/git", ("worktree", "add", "--detach", _arg_path(path), sha), self._layout.releases.parent, timeout_seconds), "release_preparation_failed")
+        path.mkdir(mode=0o750, parents=True, exist_ok=True)
+        release = ReleaseIdentity(sha, sha, path)
+        if not self.verify(release):
+            raise DeploymentFailure("release_identity_invalid")
+        return release
     def verify(self, release: ReleaseIdentity) -> bool:
-        return _fixed(self._runner, "/usr/bin/git", ("cat-file", "-e", release.sha), self._cwd, 60) == "ok"
+        result = execute_command(self._runner, executable=Path("/usr/bin/git"), argv=("-C", _arg_path(release.path), "rev-parse", "HEAD"), environment={"LANG": "C"}, cwd=release.path, timeout_seconds=60, redact=lambda value: value.strip())
+        return result.category == "ok" and result.stdout == release.sha
     def preflight(self, release: ReleaseIdentity, timeout_seconds: int) -> bool:
-        sync = _fixed(self._runner, "/usr/local/bin/pipenv", ("sync", "--deploy", "--ignore-pipfile"), self._cwd, timeout_seconds)
-        compile_result = _fixed(self._runner, "/usr/local/bin/pipenv", ("run", "python", "-m", "compileall", "."), self._cwd, timeout_seconds)
-        return sync == "ok" and compile_result == "ok"
-    def cleanup(self, release_id: str) -> None: return None
+        forbidden = (release.path / ".env", release.path / "configuration.json", release.path / "db" / "bot.db", release.path / "logs", release.path / "runtime")
+        if any(path.exists() for path in forbidden):
+            return False
+        environment = {"LANG": "C", "PIPENV_VENV_IN_PROJECT": "1"}
+        python = _fixed(self._runner, "/usr/local/bin/pipenv", ("--python", "3.12"), release.path, timeout_seconds, environment)
+        sync = _fixed(self._runner, "/usr/local/bin/pipenv", ("sync", "--deploy", "--ignore-pipfile"), release.path, timeout_seconds, environment)
+        compile_result = _fixed(self._runner, "/usr/local/bin/pipenv", ("run", "python", "-m", "compileall", "."), release.path, timeout_seconds, environment)
+        return python == "ok" and sync == "ok" and compile_result == "ok"
+    def cleanup(self, release_id: str) -> None:
+        # Destructive release removal is deliberately delegated to a separately
+        # approved root helper; this adapter only accepts the exact release name.
+        if not SHA_PATTERN.fullmatch(release_id):
+            return
 
 
 class _FixedMigrations:
-    def __init__(self, runner: CommandRunner, cwd: Path): self._runner, self._cwd = runner, cwd
+    def __init__(self, runner: CommandRunner): self._runner = runner
     def rehearse(self, release: ReleaseIdentity, database: Path, timeout_seconds: int) -> bool:
-        return _fixed(self._runner, "/usr/local/bin/pipenv", ("run", "yoyo", "apply", "--batch", "--database", str(database)), self._cwd, timeout_seconds) == "ok"
+        return self._run(release, database, timeout_seconds)
     def apply(self, release: ReleaseIdentity, database: Path, timeout_seconds: int) -> bool:
-        return _fixed(self._runner, "/usr/local/bin/pipenv", ("run", "yoyo", "apply", "--batch", "--database", str(database)), self._cwd, timeout_seconds) == "ok"
-    def validate(self, database: Path, timeout_seconds: int) -> bool:
-        return _fixed(self._runner, "/usr/local/bin/pipenv", ("run", "yoyo", "list", "--database", str(database)), self._cwd, timeout_seconds) == "ok"
+        return self._run(release, database, timeout_seconds)
+    def validate(self, release: ReleaseIdentity, database: Path, timeout_seconds: int) -> bool:
+        python = release.path / ".venv" / "bin" / "python"
+        return _fixed(self._runner, _arg_path(python), ("-m", "scripts.migrate", "--check", "--database", _arg_path(database), "--migrations", _arg_path(release.path / "db" / "migrations")), release.path, timeout_seconds) == "ok"
+    def _run(self, release: ReleaseIdentity, database: Path, timeout_seconds: int) -> bool:
+        python = release.path / ".venv" / "bin" / "python"
+        return _fixed(self._runner, _arg_path(python), ("-m", "scripts.migrate", "--database", _arg_path(database), "--migrations", _arg_path(release.path / "db" / "migrations")), release.path, timeout_seconds) == "ok"
+
+
+class _FixedProcesses:
+    def __init__(self, layout: ServerLayout, runner: CommandRunner): self._layout, self._runner = layout, runner
+    def no_bot_process(self, timeout_seconds: int) -> bool:
+        result = execute_command(self._runner, executable=Path("/bin/systemctl"), argv=("show", "fogbot.service", "--property=MainPID", "--value"), environment={"LANG": "C"}, cwd=self._layout.state, timeout_seconds=timeout_seconds, redact=lambda value: value.strip())
+        return result.category == "ok" and result.stdout == "0"
+    def acquire_instance_lock(self, timeout_seconds: int) -> bool:
+        return _fixed(self._runner, "/usr/bin/flock", ("-n", "/run/fogbot/instance.lock", "/usr/bin/true"), self._layout.state, timeout_seconds) == "ok"
+    def identity(self, timeout_seconds: int) -> ProcessIdentity | None:
+        try:
+            payload, _ = _read_regular_bytes(self._layout.readiness, 16 * 1024)
+            value = json.loads(payload.decode("utf-8"))
+            return ProcessIdentity(value["pid"], value["generation"], value["boot_id"])
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            return None
+
+
+class _FixedHealth:
+    def __init__(self, layout: ServerLayout): self._layout = layout
+    def observe(self, expected_sha: str, expected_process: ProcessIdentity, policy: HealthPolicy) -> bool:
+        deadline = time.monotonic() + policy.observation_window_seconds
+        while True:
+            if not evaluate_readiness(self._layout.readiness, expected_sha, now=lambda: datetime.now(UTC), expected_process=expected_process, policy=policy).ready:
+                return False
+            if time.monotonic() >= deadline:
+                return True
+            time.sleep(min(1, max(0.01, deadline - time.monotonic())))
 
 
 @dataclass(frozen=True, slots=True)
 class FixedArgAdapters:
     """Reviewable concrete adapters. They use only Task 2's no-shell runner."""
 
+    layout: ServerLayout
     runner: CommandRunner
-    cwd: Path
 
     @property
-    def service(self) -> _FixedService: return _FixedService(self.runner, self.cwd)
+    def service(self) -> _FixedService: return _FixedService(self.runner, self.layout.releases.parent)
     @property
-    def preparer(self) -> _FixedPreparer: return _FixedPreparer(self.runner, self.cwd)
+    def preparer(self) -> _FixedPreparer: return _FixedPreparer(self.layout, self.runner)
     @property
-    def migrations(self) -> _FixedMigrations: return _FixedMigrations(self.runner, self.cwd)
+    def migrations(self) -> _FixedMigrations: return _FixedMigrations(self.runner)
+    @property
+    def processes(self) -> _FixedProcesses: return _FixedProcesses(self.layout, self.runner)
+    @property
+    def health(self) -> _FixedHealth: return _FixedHealth(self.layout)
 
 
 class AtomicSymlinkSwitcher:
@@ -486,8 +591,12 @@ class AtomicSymlinkSwitcher:
         return target
 
 
-def _fixed(runner: CommandRunner, executable: str, argv: tuple[str, ...], cwd: Path, timeout: int) -> str:
-    return execute_command(runner, executable=Path(executable), argv=argv, environment={"LANG": "C"}, cwd=cwd, timeout_seconds=timeout).category
+def _fixed(runner: CommandRunner, executable: str, argv: tuple[str, ...], cwd: Path, timeout: int, environment: dict[str, str] | None = None) -> str:
+    return execute_command(runner, executable=Path(executable), argv=argv, environment=environment or {"LANG": "C"}, cwd=cwd, timeout_seconds=timeout).category
+
+
+def _arg_path(path: Path) -> str:
+    return path.as_posix()
 
 
 def _require(category: str, code: str) -> None:
@@ -524,10 +633,7 @@ def _backup_configuration(source: Path, destination: Path) -> BackupIdentity:
 
 
 def _configuration_bytes(path: Path) -> bytes:
-    _regular_file(path)
-    payload = path.read_bytes()
-    if len(payload) > 64 * 1024:
-        raise OSError
+    payload, _ = _read_regular_bytes(path, 64 * 1024)
     value = json.loads(payload.decode("utf-8"))
     if not isinstance(value, dict):
         raise ValueError
@@ -540,13 +646,23 @@ def _validate_configuration(path: Path) -> BackupIdentity:
 
 
 def _write_private(destination: Path, payload: bytes) -> None:
+    original = destination.lstat() if destination.exists() else None
+    if original is not None and not stat.S_ISREG(original.st_mode):
+        raise OSError
     descriptor, temporary = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
     try:
         with os.fdopen(descriptor, "wb") as stream:
+            if original is not None:
+                os.chmod(temporary, stat.S_IMODE(original.st_mode))
+                if os.name == "posix" and hasattr(os, "fchown"):
+                    os.fchown(stream.fileno(), original.st_uid, original.st_gid)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        if original is not None and not _same_file(original, destination.lstat()):
+            raise OSError
         os.replace(temporary, destination)
+        _fsync_parent(destination.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -561,16 +677,54 @@ def _fsync_parent(path: Path) -> None:
         os.close(descriptor)
 
 
-def _restore_file(source: Path, destination: Path, validator: object) -> None:
-    validator(source)  # type: ignore[operator]
-    _write_private(destination, source.read_bytes())
-    validator(destination)  # type: ignore[operator]
+def _restore_file(source: Path, destination: Path, validator: object, expected: BackupIdentity) -> None:
+    try:
+        source_identity = validator(source)  # type: ignore[operator]
+        if source_identity.sha256 != expected.sha256:
+            raise ValueError
+        payload, _ = _read_regular_bytes(source, 128 * 1024 * 1024)
+        _write_private(destination, payload)
+        restored = validator(destination)  # type: ignore[operator]
+        if restored.sha256 != expected.sha256:
+            raise ValueError
+    except (OSError, ValueError, TransactionError):
+        raise DeploymentFailure("backup_failed") from None
 
 
 def _write_sha_marker(path: Path, sha: str) -> None:
     if not SHA_PATTERN.fullmatch(sha):
         raise DeploymentFailure("switch_failed")
     _write_private(path, f"{sha}\n".encode("ascii"))
+
+
+def _read_sha_marker(path: Path) -> str:
+    try:
+        payload, _ = _read_regular_bytes(path, 64)
+        value = payload.decode("ascii")
+        value = value.rstrip("\r\n")
+        if not SHA_PATTERN.fullmatch(value):
+            raise ValueError
+        return value
+    except (OSError, UnicodeDecodeError, ValueError):
+        raise DeploymentFailure("switch_failed") from None
+
+
+def switch_release_and_marker(switcher: ReleaseSwitcher, marker: Path, release: ReleaseIdentity) -> None:
+    """Keep current/marker coherent while service is stopped and the transaction lock is held."""
+    old_release = switcher.current_release_id()
+    old_marker = _read_sha_marker(marker)
+    try:
+        switcher.switch(release)
+        _write_sha_marker(marker, release.sha)
+    except (DeploymentFailure, OSError, ValueError):
+        try:
+            switcher.restore(old_release)
+            _write_sha_marker(marker, old_marker)
+            if switcher.current_release_id() != old_release or _read_sha_marker(marker) != old_marker:
+                raise ValueError
+        except (DeploymentFailure, OSError, ValueError):
+            raise DeploymentFailure("manual_intervention_required") from None
+        raise DeploymentFailure("switch_failed") from None
 
 
 def _safe_code(value: str, fallback: str) -> str:

@@ -21,6 +21,7 @@ PHASES = frozenset(
         "authorized",
         "preparing",
         "ready_to_stop",
+        "stopping",
         "stopped",
         "backed_up",
         "migrated",
@@ -88,6 +89,9 @@ class OperationRecord:
     backup_database_id: str | None = None
     migration_applied: bool = False
     diagnostic_code: str = "pending"
+    deployment_date: str | None = None
+    deployed_release_id: str | None = None
+    previous_marker_sha: str | None = None
 
     def __post_init__(self) -> None:
         if not OPERATION_ID_PATTERN.fullmatch(self.operation_id) or self.idempotency_key != self.operation_id:
@@ -110,6 +114,16 @@ class OperationRecord:
             parse_version(self.target["target_version"])
         except VersionError as error:
             raise StateError("state_invalid") from error
+        if self.deployment_date is not None:
+            try:
+                if datetime.strptime(self.deployment_date, "%Y-%m-%d").strftime("%Y-%m-%d") != self.deployment_date:
+                    raise ValueError
+            except (TypeError, ValueError) as error:
+                raise StateError("state_invalid") from error
+        if self.deployed_release_id is not None and not re.fullmatch(r"[0-9a-f]{40}", self.deployed_release_id):
+            raise StateError("state_invalid")
+        if self.previous_marker_sha is not None and not re.fullmatch(r"[0-9a-f]{40}", self.previous_marker_sha):
+            raise StateError("state_invalid")
 
     @classmethod
     def authorized(cls, verified: VerifiedRun, operation_id: str, target_version: str) -> OperationRecord:
@@ -141,6 +155,9 @@ class OperationRecord:
         backup_release_id: str | None = None,
         backup_database_id: str | None = None,
         migration_applied: bool | None = None,
+        deployment_date: str | None = None,
+        deployed_release_id: str | None = None,
+        previous_marker_sha: str | None = None,
         when: datetime | None = None,
     ) -> OperationRecord:
         """Return a validated phase update without accepting error or log text."""
@@ -158,6 +175,9 @@ class OperationRecord:
             backup_database_id=backup_database_id if backup_database_id is not None else self.backup_database_id,
             migration_applied=migration_applied if migration_applied is not None else self.migration_applied,
             diagnostic_code=diagnostic_code,
+            deployment_date=deployment_date if deployment_date is not None else self.deployment_date,
+            deployed_release_id=deployed_release_id if deployed_release_id is not None else self.deployed_release_id,
+            previous_marker_sha=previous_marker_sha if previous_marker_sha is not None else self.previous_marker_sha,
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -174,6 +194,9 @@ class OperationRecord:
             "backup_database_id": self.backup_database_id,
             "migration_applied": self.migration_applied,
             "diagnostic_code": self.diagnostic_code,
+            "deployment_date": self.deployment_date,
+            "deployed_release_id": self.deployed_release_id,
+            "previous_marker_sha": self.previous_marker_sha,
         }
 
     @classmethod
@@ -191,6 +214,9 @@ class OperationRecord:
             "backup_database_id",
             "migration_applied",
             "diagnostic_code",
+            "deployment_date",
+            "deployed_release_id",
+            "previous_marker_sha",
         }
         if set(value) != expected or not isinstance(value.get("target"), dict) or not isinstance(value.get("timestamps"), dict):
             raise StateError("state_invalid")
@@ -207,6 +233,9 @@ class OperationRecord:
                 backup_database_id=value["backup_database_id"],
                 migration_applied=value["migration_applied"],
                 diagnostic_code=value["diagnostic_code"],
+                deployment_date=value["deployment_date"],
+                deployed_release_id=value["deployed_release_id"],
+                previous_marker_sha=value["previous_marker_sha"],
             )
         except (KeyError, TypeError) as error:
             raise StateError("state_invalid") from error
