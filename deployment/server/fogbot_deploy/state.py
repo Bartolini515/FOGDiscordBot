@@ -11,6 +11,7 @@ import re
 from typing import Any, Mapping
 from uuid import uuid4
 
+from .protocol import VersionError, parse_version
 from .verifier import VerifiedRun
 
 
@@ -82,15 +83,23 @@ class OperationRecord:
             raise StateError("state_invalid")
         if self.result not in {None, "pending", "success", "failure"}:
             raise StateError("state_invalid")
-        if set(self.target) != {"repository_id", "run_id", "run_attempt", "sha"}:
+        if set(self.target) != {"repository_id", "run_id", "run_attempt", "sha", "target_version"}:
             raise StateError("state_invalid")
         if not isinstance(self.target["repository_id"], int) or not isinstance(self.target["run_id"], int):
             raise StateError("state_invalid")
-        if not isinstance(self.target["run_attempt"], int) or not isinstance(self.target["sha"], str):
+        if (
+            not isinstance(self.target["run_attempt"], int)
+            or not isinstance(self.target["sha"], str)
+            or not isinstance(self.target["target_version"], str)
+        ):
             raise StateError("state_invalid")
+        try:
+            parse_version(self.target["target_version"])
+        except VersionError as error:
+            raise StateError("state_invalid") from error
 
     @classmethod
-    def authorized(cls, verified: VerifiedRun, operation_id: str) -> OperationRecord:
+    def authorized(cls, verified: VerifiedRun, operation_id: str, target_version: str) -> OperationRecord:
         """Create the first durable record after external authorization succeeds."""
         timestamp = _format_timestamp(verified.verified_at)
         return cls(
@@ -101,6 +110,7 @@ class OperationRecord:
                 "run_id": verified.run_id,
                 "run_attempt": verified.run_attempt,
                 "sha": verified.sha,
+                "target_version": target_version,
             },
             result="pending",
             phase="authorized",

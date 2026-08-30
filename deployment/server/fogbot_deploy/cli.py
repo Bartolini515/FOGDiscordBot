@@ -9,7 +9,8 @@ import os
 import sys
 from typing import Protocol, TextIO
 
-from .protocol import CommandError, StatusRequest, SubmitRequest, operation_id_for, parse_command
+from .metadata import CurrentMetadata
+from .protocol import CurrentRequest, CommandError, StatusRequest, SubmitRequest, operation_id_for, parse_command
 from .state import OperationNotFound, OperationRecord, OperationStore, StateError
 from .verifier import VerificationError, VerifiedRun
 
@@ -26,6 +27,12 @@ class TransactionLauncher(Protocol):
     def start(self, record: OperationRecord) -> None: ...
 
 
+class MetadataReader(Protocol):
+    """Boundary that returns only safe current deployment metadata."""
+
+    def read(self) -> CurrentMetadata: ...
+
+
 @dataclass(frozen=True, slots=True)
 class CommandResponse:
     """Compact machine-readable forced-command result."""
@@ -38,10 +45,17 @@ class CommandResponse:
 class ForcedCommandHandler:
     """Create/status deployment operations from one strict SSH original command."""
 
-    def __init__(self, verifier: RunVerifier, store: OperationStore, launcher: TransactionLauncher) -> None:
+    def __init__(
+        self,
+        verifier: RunVerifier,
+        store: OperationStore,
+        launcher: TransactionLauncher,
+        metadata_reader: MetadataReader,
+    ) -> None:
         self._verifier = verifier
         self._store = store
         self._launcher = launcher
+        self._metadata_reader = metadata_reader
 
     def handle(self, original_command: str | None) -> CommandResponse:
         """Process a command without starting a shell or interpolating any user text."""
@@ -49,6 +63,8 @@ class ForcedCommandHandler:
             command = parse_command(original_command)
         except CommandError:
             return _error(2, "invalid_command")
+        if isinstance(command, CurrentRequest):
+            return self._current()
         if isinstance(command, StatusRequest):
             return self._status(command)
         return self._submit(command)
@@ -69,7 +85,7 @@ class ForcedCommandHandler:
             return _error(3, "verification_failed")
 
         operation_id = operation_id_for(request)
-        record = OperationRecord.authorized(verified, operation_id)
+        record = OperationRecord.authorized(verified, operation_id, request.version)
         try:
             persisted, created = self._store.create_or_read(record)
         except StateError:
@@ -81,6 +97,13 @@ class ForcedCommandHandler:
                 self._store.write(persisted.with_phase("failed", "launcher_failed", result="failure"))
                 return _error(4, "launcher_failed")
         return _success({"operation_id": persisted.operation_id, "phase": persisted.phase})
+
+    def _current(self) -> CommandResponse:
+        try:
+            metadata = self._metadata_reader.read()
+        except Exception:
+            return _error(4, "configuration_unavailable")
+        return _success({"version": metadata.version, "last_updated": metadata.last_updated})
 
     def _status(self, request: StatusRequest) -> CommandResponse:
         try:

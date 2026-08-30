@@ -43,24 +43,41 @@ def _cli_module():
         pytest.fail("forced command CLI has not been implemented")
 
 
+def _metadata_module():
+    try:
+        return importlib.import_module("deployment.server.fogbot_deploy.metadata")
+    except ModuleNotFoundError:
+        pytest.fail("deployment metadata reader has not been implemented")
+
+
 def test_submit_parser_accepts_only_the_exact_approved_grammar():
     """Catch a parser regression that accepts injected or malformed submit commands."""
     protocol = _protocol_module()
 
     parsed = protocol.parse_command(
-        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22"
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11"
     )
 
     assert parsed.sha == "0123456789abcdef0123456789abcdef01234567"
     assert parsed.run_id == 71
     assert parsed.run_attempt == 2
     assert parsed.repository_id == 22
+    assert parsed.version == "1.2.11"
+    assert isinstance(protocol.parse_command("current"), protocol.CurrentRequest)
 
     for command in (
-        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 extra",
-        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22;id",
-        "submit 0123456789abcdef0123456789abcdef01234567 0 2 22",
-        "submit 0123456789abcdef0123456789abcdef01234567 71 2 -22",
+        "current extra",
+        " submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11 extra",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11;id",
+        "submit 0123456789abcdef0123456789abcdef01234567 0 2 22 1.2.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 -22 1.2.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 v1.2.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 01.2.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.02.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.011",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 ١.٢.٣",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11-rc1",
         "status ABCDEF0123456789abcdef0123456789",
     ):
         with pytest.raises(protocol.CommandError):
@@ -75,6 +92,7 @@ def test_operation_id_is_stable_and_strictly_lowercase_hex():
         run_id=71,
         run_attempt=2,
         repository_id=22,
+        version="1.2.11",
     )
 
     operation_id = protocol.operation_id_for(request)
@@ -84,6 +102,22 @@ def test_operation_id_is_stable_and_strictly_lowercase_hex():
     assert operation_id.isascii()
     assert operation_id.islower()
     assert all(character in "0123456789abcdef" for character in operation_id)
+
+
+def test_operation_id_changes_when_only_operator_version_changes():
+    """Catch a replay regression that aliases deployments with different declared versions."""
+    protocol = _protocol_module()
+    common = {
+        "sha": "0123456789abcdef0123456789abcdef01234567",
+        "run_id": 71,
+        "run_attempt": 2,
+        "repository_id": 22,
+    }
+
+    first = protocol.operation_id_for(protocol.SubmitRequest(**common, version="1.2.11"))
+    second = protocol.operation_id_for(protocol.SubmitRequest(**common, version="1.2.12"))
+
+    assert first != second
 
 
 class FakeHttp:
@@ -143,7 +177,7 @@ def _verify(run_payload, now: datetime, *, request_sha=None, main_sha=None, acti
     main_url = "https://api.github.com/repos/example-owner/example-repository/git/ref/heads/main"
     http = FakeHttp({run_url: run_payload, main_url: {"object": {"sha": main_sha or run_payload["head_sha"]}}})
     checked = verifier.GitHubRunVerifier(config, http, now=lambda: now).verify(
-        protocol.SubmitRequest(request_sha or run_payload["head_sha"], 71, 2, 22)
+        protocol.SubmitRequest(request_sha or run_payload["head_sha"], 71, 2, 22, "1.2.11")
     )
     return checked, http
 
@@ -212,9 +246,9 @@ def test_operation_store_creates_an_atomic_redacted_json_record(tmp_path):
     now = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
     state = _state_module()
     protocol = _protocol_module()
-    request = protocol.SubmitRequest("0123456789abcdef0123456789abcdef01234567", 71, 2, 22)
+    request = protocol.SubmitRequest("0123456789abcdef0123456789abcdef01234567", 71, 2, 22, "1.2.11")
     operation_id = protocol.operation_id_for(request)
-    record = state.OperationRecord.authorized(_verified_run(now), operation_id)
+    record = state.OperationRecord.authorized(_verified_run(now), operation_id, request.version)
     store = state.OperationStore(tmp_path / "operations")
 
     saved, created = store.create_or_read(record)
@@ -223,7 +257,13 @@ def test_operation_store_creates_an_atomic_redacted_json_record(tmp_path):
     assert created is True
     assert saved.operation_id == operation_id
     assert raw["phase"] == "authorized"
-    assert raw["target"] == {"repository_id": 22, "run_attempt": 2, "run_id": 71, "sha": request.sha}
+    assert raw["target"] == {
+        "repository_id": 22,
+        "run_attempt": 2,
+        "run_id": 71,
+        "sha": request.sha,
+        "target_version": "1.2.11",
+    }
     assert raw["diagnostic_code"] == "authorized"
     assert "error" not in raw
     assert "log" not in raw
@@ -248,6 +288,16 @@ class AcceptingVerifier:
         return self.verified
 
 
+class FixedMetadataReader:
+    def __init__(self, version="1.2.11", last_updated="2026-08-20"):
+        self.version = version
+        self.last_updated = last_updated
+
+    def read(self):
+        metadata = _metadata_module()
+        return metadata.CurrentMetadata(self.version, self.last_updated)
+
+
 def test_forced_command_replays_submit_without_relaunching_and_reports_status(tmp_path):
     """Catch replay behavior that starts two deployment transactions for one CI run."""
     now = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
@@ -255,8 +305,10 @@ def test_forced_command_replays_submit_without_relaunching_and_reports_status(tm
     state = _state_module()
     verifier = AcceptingVerifier(_verified_run(now))
     launcher = RecordingLauncher()
-    handler = cli.ForcedCommandHandler(verifier, state.OperationStore(tmp_path / "operations"), launcher)
-    command = "submit 0123456789abcdef0123456789abcdef01234567 71 2 22"
+    handler = cli.ForcedCommandHandler(
+        verifier, state.OperationStore(tmp_path / "operations"), launcher, FixedMetadataReader()
+    )
+    command = "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11"
 
     first = handler.handle(command)
     second = handler.handle(command)
@@ -270,6 +322,122 @@ def test_forced_command_replays_submit_without_relaunching_and_reports_status(tm
     assert json.loads(status.stdout)["phase"] == "authorized"
 
 
+def test_forced_command_uses_version_as_replay_identity_and_persists_it(tmp_path):
+    """Catch a replay regression that reuses the operation of a different target version."""
+    now = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+    cli = _cli_module()
+    state = _state_module()
+    launcher = RecordingLauncher()
+    handler = cli.ForcedCommandHandler(
+        AcceptingVerifier(_verified_run(now)), state.OperationStore(tmp_path / "operations"), launcher, FixedMetadataReader()
+    )
+
+    initial = handler.handle("submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11")
+    replay = handler.handle("submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11")
+    changed = handler.handle("submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.12")
+
+    assert initial.stdout == replay.stdout
+    assert json.loads(initial.stdout)["operation_id"] != json.loads(changed.stdout)["operation_id"]
+    assert len(launcher.operation_ids) == 2
+    first_target = json.loads(
+        (tmp_path / "operations" / f"{json.loads(initial.stdout)['operation_id']}.json").read_text(encoding="utf-8")
+    )["target"]
+    assert first_target["target_version"] == "1.2.11"
+
+
+def test_current_returns_only_redacted_version_metadata(tmp_path):
+    """Catch a current-command regression that exposes full production configuration."""
+    metadata = _metadata_module()
+    cli = _cli_module()
+    state = _state_module()
+    config_path = tmp_path / "configuration.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "technical_info": {"version": "1.2.11", "last_updated": "2026-08-20"},
+                "discord_token": "not-returned",
+                "channels": {"internal": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    handler = cli.ForcedCommandHandler(
+        AcceptingVerifier(_verified_run(datetime(2026, 8, 30, tzinfo=UTC))),
+        state.OperationStore(tmp_path / "operations"),
+        RecordingLauncher(),
+        metadata.ProductionMetadataReader(config_path),
+    )
+
+    response = handler.handle("current")
+
+    assert response.exit_code == 0
+    assert json.loads(response.stdout) == {"ok": True, "version": "1.2.11", "last_updated": "2026-08-20"}
+    assert "not-returned" not in response.stdout
+    assert str(config_path) not in response.stdout
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{",
+        json.dumps({"technical_info": {"version": "01.2.11", "last_updated": "2026-08-20"}}),
+        json.dumps({"technical_info": {"version": "١.٢.٣", "last_updated": "2026-08-20"}}),
+        json.dumps({"technical_info": {"version": "1.2.11", "last_updated": "2026-02-30"}}),
+        json.dumps({"technical_info": {"version": 12, "last_updated": "2026-08-20"}}),
+    ],
+)
+def test_current_redacts_missing_or_invalid_configuration(tmp_path, content):
+    """Catch a metadata-reader regression that leaks invalid configuration details."""
+    metadata = _metadata_module()
+    cli = _cli_module()
+    state = _state_module()
+    config_path = tmp_path / "configuration.json"
+    config_path.write_text(content, encoding="utf-8")
+    handler = cli.ForcedCommandHandler(
+        AcceptingVerifier(_verified_run(datetime(2026, 8, 30, tzinfo=UTC))),
+        state.OperationStore(tmp_path / "operations"),
+        RecordingLauncher(),
+        metadata.ProductionMetadataReader(config_path),
+    )
+
+    response = handler.handle("current")
+
+    assert response.exit_code == 4
+    assert json.loads(response.stdout) == {"code": "configuration_unavailable", "ok": False}
+    assert str(config_path) not in response.stdout
+
+
+def test_current_rejects_missing_oversized_and_non_regular_configuration(tmp_path):
+    """Catch a metadata-reader regression that accepts unsafe configuration inputs."""
+    metadata = _metadata_module()
+    cli = _cli_module()
+    state = _state_module()
+    missing = metadata.ProductionMetadataReader(tmp_path / "missing.json")
+    oversized_path = tmp_path / "oversized.json"
+    oversized_path.write_bytes(b"x" * (metadata.MAXIMUM_CONFIGURATION_BYTES + 1))
+    oversized = metadata.ProductionMetadataReader(oversized_path)
+    directory = metadata.ProductionMetadataReader(tmp_path)
+
+    for reader in (missing, oversized, directory):
+        handler = cli.ForcedCommandHandler(
+            AcceptingVerifier(_verified_run(datetime(2026, 8, 30, tzinfo=UTC))),
+            state.OperationStore(tmp_path / "operations"),
+            RecordingLauncher(),
+            reader,
+        )
+        response = handler.handle("current")
+
+        assert response.exit_code == 4
+        assert json.loads(response.stdout) == {"code": "configuration_unavailable", "ok": False}
+
+
+def test_repository_does_not_contain_a_github_cd_workflow():
+    """Catch scope drift that reintroduces prohibited automatic deployment automation."""
+    from pathlib import Path
+
+    assert not Path(".github/workflows/cd.yml").exists()
+
+
 def test_forced_command_rejects_malformed_input_and_redacts_verifier_errors(tmp_path):
     """Catch a forced-command regression that exposes an exception or accepts shell syntax."""
     cli = _cli_module()
@@ -280,10 +448,12 @@ def test_forced_command_rejects_malformed_input_and_redacts_verifier_errors(tmp_
         def verify(self, request):
             raise verifier_module.VerificationError("workflow_mismatch")
 
-    handler = cli.ForcedCommandHandler(RejectingVerifier(), state.OperationStore(tmp_path / "operations"), RecordingLauncher())
+    handler = cli.ForcedCommandHandler(
+        RejectingVerifier(), state.OperationStore(tmp_path / "operations"), RecordingLauncher(), FixedMetadataReader()
+    )
 
-    malformed = handler.handle("submit 0123456789abcdef0123456789abcdef01234567 71 2 22; id")
-    rejected = handler.handle("submit 0123456789abcdef0123456789abcdef01234567 71 2 22")
+    malformed = handler.handle("submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11; id")
+    rejected = handler.handle("submit 0123456789abcdef0123456789abcdef01234567 71 2 22 1.2.11")
 
     assert malformed.exit_code == 2
     assert json.loads(malformed.stdout) == {"code": "invalid_command", "ok": False}
