@@ -47,6 +47,19 @@ DIAGNOSTIC_CODES = frozenset(
         "health_check_failed",
         "manual_intervention_required",
         "state_invalid",
+        "layout_invalid",
+        "capacity_insufficient",
+        "service_state_invalid",
+        "release_conflict",
+        "release_preparation_failed",
+        "release_identity_invalid",
+        "preflight_failed",
+        "revalidation_failed",
+        "stop_failed",
+        "exclusion_failed",
+        "recovered",
+        "target_invalid",
+        "clock_invalid",
     }
 )
 OPERATION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")

@@ -1,0 +1,22 @@
+# Fill each <...> value after approved, read-only server inspection. Do not install verbatim.
+[Unit]
+Description=FogBot service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<FOGBOT_USER>
+Group=<FOGBOT_GROUP>
+EnvironmentFile=-/etc/fogbot/fogbot.env
+WorkingDirectory=/opt/fogbot/current
+ExecStart=/opt/fogbot/current/.venv/bin/python /opt/fogbot/current/main.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=180
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

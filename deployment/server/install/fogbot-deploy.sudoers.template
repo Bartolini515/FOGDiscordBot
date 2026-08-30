@@ -1,0 +1,4 @@
+# Template only. Replace placeholders after inspection; do not install verbatim.
+# The helper is root-owned and independently validates this exact grammar.
+Cmnd_Alias FOGBOT_DEPLOY = /usr/local/libexec/fogbot-deploy ^(current|status [0-9a-f]{32}|submit [0-9a-f]{40} [1-9][0-9]* [1-9][0-9]* [1-9][0-9]* (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$
+<FOGBOT_OPERATOR> ALL=(root) NOPASSWD: FOGBOT_DEPLOY

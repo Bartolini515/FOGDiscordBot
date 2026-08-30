@@ -1,0 +1,6 @@
+# Optional template only; replace placeholders after read-only inspection.
+d /opt/fogbot 0750 root <FOGBOT_GROUP> -
+d /opt/fogbot/releases 0750 root <FOGBOT_GROUP> -
+d /opt/fogbot/shared 0750 root <FOGBOT_GROUP> -
+d /var/lib/fogbot/operations 0700 root root -
+d /var/lib/fogbot/backups 0700 root root -
