@@ -14,6 +14,7 @@ import sqlite3
 import stat
 import subprocess
 import tempfile
+import time
 from types import MappingProxyType
 from typing import BinaryIO, Callable, Mapping, Protocol, Self
 
@@ -27,6 +28,7 @@ class TransactionError(RuntimeError):
 SHELL_CHARACTERS = frozenset(";&|$`()<>\\\"'*?![]{}~\r\n\t")
 MAXIMUM_CONFIGURATION_BYTES = 64 * 1024
 MAXIMUM_READINESS_BYTES = 16 * 1024
+MAXIMUM_SQLITE_BYTES = 128 * 1024 * 1024
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
@@ -83,8 +85,8 @@ class SubprocessCommandRunner:
                 capture_output=True,
                 timeout=timeout_seconds,
             )
-        except subprocess.TimeoutExpired as error:
-            raise TimeoutError from error
+        except subprocess.TimeoutExpired:
+            raise TimeoutError from None
         return RawCommandResult(completed.returncode, completed.stdout, completed.stderr)
 
 
@@ -160,12 +162,12 @@ class DeploymentLock:
                 os.fsync(stream.fileno())
             stream.seek(0)
             _lock_nonblocking(stream)
-        except OSError as error:
+        except OSError:
             try:
                 stream.close()
             except UnboundLocalError:
                 pass
-            raise TransactionError("deployment_in_progress") from error
+            raise TransactionError("deployment_in_progress") from None
         self._stream = stream
 
     def release(self) -> None:
@@ -206,15 +208,18 @@ def update_configuration_metadata(path: Path, *, version: str, last_updated: str
     """Durably replace a regular JSON configuration after changing only two metadata fields.
 
     The descriptor is checked before reading and the destination is checked again before
-    replacement.  A hostile swap in the narrow interval before ``os.replace`` remains a
-    filesystem-level TOCTOU boundary for the future privileged caller to contain.
+    replacement. On POSIX the replacement inherits mode, uid, and gid; on Windows it
+    intentionally relies on the parent directory's ACL policy because the standard
+    library cannot preserve a file's ACL across replacement. A hostile swap in the
+    narrow interval before ``os.replace`` remains a filesystem-level TOCTOU boundary
+    for the future privileged caller to contain.
     """
     try:
         parse_version(version)
         if not isinstance(last_updated, str) or datetime.strptime(last_updated, "%Y-%m-%d").strftime("%Y-%m-%d") != last_updated:
             raise ValueError
-    except (TypeError, ValueError, VersionError) as error:
-        raise TransactionError("invalid_metadata") from error
+    except (TypeError, ValueError, VersionError):
+        raise TransactionError("invalid_metadata") from None
     try:
         payload, source_status = _read_regular_bytes(path, MAXIMUM_CONFIGURATION_BYTES)
         value = json.loads(payload.decode("utf-8"))
@@ -225,8 +230,8 @@ def update_configuration_metadata(path: Path, *, version: str, last_updated: str
         technical_info["last_updated"] = last_updated
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         _atomic_replace_verified(path, source_status, encoded)
-    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
-        raise TransactionError("metadata_unavailable") from error
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        raise TransactionError("metadata_unavailable") from None
 
 
 def _read_regular_bytes(path: Path, maximum: int) -> tuple[bytes, os.stat_result]:
@@ -258,6 +263,12 @@ def _atomic_replace_verified(path: Path, source_status: os.stat_result, payload:
     try:
         with tempfile.NamedTemporaryFile(mode="xb", dir=path.parent, prefix=f".{path.name}.", delete=False) as stream:
             temporary_name = stream.name
+            if hasattr(os, "fchmod"):
+                os.fchmod(stream.fileno(), stat.S_IMODE(source_status.st_mode))
+            else:
+                os.chmod(temporary_name, stat.S_IMODE(source_status.st_mode))
+            if os.name == "posix" and hasattr(os, "fchown"):
+                os.fchown(stream.fileno(), source_status.st_uid, source_status.st_gid)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
@@ -273,14 +284,23 @@ def _atomic_replace_verified(path: Path, source_status: os.stat_result, payload:
 
 
 def _fsync_directory(path: Path) -> None:
+    """Flush a parent directory, failing closed on POSIX and best-effort on Windows.
+
+    Windows does not provide a portable standard-library directory ``fsync`` path.
+    This module is a Linux server primitive, so a POSIX failure is always propagated;
+    Windows callers receive only the platform's parent-directory ACL policy.
+    """
     try:
         descriptor = os.open(path, os.O_RDONLY)
     except OSError:
+        if os.name == "posix":
+            raise
         return
     try:
         os.fsync(descriptor)
     except OSError:
-        pass
+        if os.name == "posix":
+            raise
     finally:
         os.close(descriptor)
 
@@ -293,45 +313,130 @@ class BackupIdentity:
     sha256: str
 
 
-def backup_sqlite_database(source: Path, destination: Path) -> BackupIdentity:
-    """Use SQLite's online backup API and validate its durable destination."""
-    reserved = False
+def backup_sqlite_database(source: Path, destination: Path, *, timeout_seconds: float = 30) -> BackupIdentity:
+    """Create, durably write, and validate an online SQLite backup without reopening it by name.
+
+    SQLite writes its online snapshot to a private temporary database.  The verified
+    bytes are then copied through one exclusively-created destination descriptor, read
+    back from that descriptor, and validated before return.  The final ``lstat`` only
+    proves that the caller-visible name still denotes the reserved inode; it is never
+    used to read the returned backup.
+    """
+    destination_status: os.stat_result | None = None
+    temporary_path: Path | None = None
+    temporary_status: os.stat_result | None = None
     try:
-        _assert_regular_file(source)
-        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.close(descriptor)
-        reserved = True
-        source_connection = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
-        destination_connection = sqlite3.connect(destination)
+        source_status = _assert_regular_file(source)
+        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+            raise ValueError
+        deadline = time.monotonic() + timeout_seconds
+        with tempfile.NamedTemporaryFile(mode="xb", dir=destination.parent, prefix=f".{destination.name}.", suffix=".sqlite", delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary_status = os.fstat(temporary.fileno())
+        source_connection = sqlite3.connect(f"{source.absolute().as_uri()}?mode=ro", uri=True, timeout=timeout_seconds)
+        temporary_connection = sqlite3.connect(temporary_path, timeout=timeout_seconds)
         try:
-            source_connection.backup(destination_connection)
-            destination_connection.commit()
+            def progress(status: int, _remaining: int, _total: int) -> None:
+                if status in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED} and time.monotonic() >= deadline:
+                    raise TimeoutError
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+
+            source_connection.backup(temporary_connection, pages=128, progress=progress, sleep=min(0.01, timeout_seconds))
+            # A WAL-mode source copies its journal-mode marker into the temporary
+            # database. Switch only the private copy back to a self-contained file
+            # before validating the exact bytes copied to the destination descriptor.
+            temporary_connection.execute("PRAGMA journal_mode=DELETE").fetchone()
         finally:
-            destination_connection.close()
+            temporary_connection.close()
             source_connection.close()
-        _fsync_regular_file(destination)
+        if not _same_file(source_status, source.lstat()):
+            raise OSError("replaced source")
+        payload, _ = _read_regular_bytes(temporary_path, MAXIMUM_SQLITE_BYTES)
+        _validate_sqlite_bytes(payload)
+        descriptor = os.open(
+            destination,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0),
+            0o600,
+        )
+        try:
+            destination_status = os.fstat(descriptor)
+            if not stat.S_ISREG(destination_status.st_mode):
+                raise OSError("unsafe output")
+            _write_all(descriptor, payload)
+            os.fsync(descriptor)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            saved_payload = _read_all(descriptor, MAXIMUM_SQLITE_BYTES)
+            if saved_payload != payload:
+                raise OSError("short write")
+            digest = _validate_sqlite_bytes(saved_payload)
+        finally:
+            os.close(descriptor)
         _fsync_directory(destination.parent)
-        return validate_sqlite_backup(destination)
-    except (OSError, sqlite3.Error, ValueError) as error:
-        if reserved:
-            destination.unlink(missing_ok=True)
-        raise TransactionError("backup_unavailable") from error
+        if not _same_file(destination_status, destination.lstat()):
+            raise OSError("replaced destination")
+        return BackupIdentity(destination.name, digest)
+    except (OSError, sqlite3.Error, ValueError, TimeoutError):
+        if destination_status is not None:
+            _unlink_if_same(destination, destination_status)
+        raise TransactionError("backup_unavailable") from None
+    finally:
+        if temporary_path is not None and temporary_status is not None:
+            _unlink_if_same(temporary_path, temporary_status)
 
 
 def validate_sqlite_backup(path: Path) -> BackupIdentity:
     """Validate a backup without returning any database contents."""
     try:
-        _assert_regular_file(path)
-        connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-        try:
-            result = connection.execute("PRAGMA integrity_check").fetchone()
-        finally:
-            connection.close()
-        if result != ("ok",):
-            raise ValueError("integrity")
-        return BackupIdentity(path.name, _digest_file(path))
-    except (OSError, sqlite3.Error, ValueError) as error:
-        raise TransactionError("backup_invalid") from error
+        payload, _ = _read_regular_bytes(path, MAXIMUM_SQLITE_BYTES)
+        return BackupIdentity(path.name, _validate_sqlite_bytes(payload))
+    except (OSError, sqlite3.Error, ValueError):
+        raise TransactionError("backup_invalid") from None
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    view = memoryview(payload)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            raise OSError
+        view = view[written:]
+
+
+def _read_all(descriptor: int, maximum: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = maximum + 1
+    while remaining:
+        chunk = os.read(descriptor, min(64 * 1024, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    payload = b"".join(chunks)
+    if len(payload) > maximum:
+        raise OSError("oversized input")
+    return payload
+
+
+def _validate_sqlite_bytes(payload: bytes) -> str:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.deserialize(payload)
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()
+        foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchone()
+    finally:
+        connection.close()
+    if integrity != ("ok",) or foreign_keys is not None:
+        raise ValueError("integrity")
+    return sha256(payload).hexdigest()
+
+
+def _unlink_if_same(path: Path, expected: os.stat_result) -> None:
+    try:
+        if _same_file(expected, path.lstat()):
+            path.unlink()
+    except OSError:
+        pass
 
 
 def _fsync_regular_file(path: Path) -> None:
@@ -344,10 +449,11 @@ def _fsync_regular_file(path: Path) -> None:
         os.close(descriptor)
 
 
-def _assert_regular_file(path: Path) -> None:
+def _assert_regular_file(path: Path) -> os.stat_result:
     status = path.lstat()
     if not stat.S_ISREG(status.st_mode):
         raise OSError("unsafe input")
+    return status
 
 
 def _digest_file(path: Path) -> str:
@@ -371,6 +477,11 @@ class HealthPolicy:
     stop_timeout_seconds: int = 180
     observation_window_seconds: int = 30
 
+    def __post_init__(self) -> None:
+        values = (self.startup_timeout_seconds, self.stop_timeout_seconds, self.observation_window_seconds)
+        if any(not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 3600 for value in values):
+            raise TransactionError("invalid_health_policy")
+
 
 @dataclass(frozen=True, slots=True)
 class HealthResult:
@@ -391,20 +502,23 @@ def evaluate_readiness(
         payload, _ = _read_regular_bytes(path, MAXIMUM_READINESS_BYTES)
         value = json.loads(payload.decode("utf-8"))
         expected_keys = {"schema_version", "release_sha", "pid", "generation", "boot_id", "ready_at", "heartbeat_at"}
-        if not isinstance(value, dict) or set(value) != expected_keys or value["schema_version"] != 1:
+        if not isinstance(value, dict) or set(value) != expected_keys or type(value["schema_version"]) is not int or value["schema_version"] != 1:
             return HealthResult(False, "readiness_schema_invalid")
         if not isinstance(expected_sha, str) or not SHA_PATTERN.fullmatch(expected_sha) or value["release_sha"] != expected_sha:
             return HealthResult(False, "release_mismatch")
+        if type(value["pid"]) is not int or value["pid"] <= 0 or not _valid_uuid(value["generation"]) or not isinstance(value["boot_id"], str) or not 1 <= len(value["boot_id"]) <= 128:
+            return HealthResult(False, "readiness_schema_invalid")
         if expected_process is not None and (value["pid"], value["generation"], value["boot_id"]) != (
             expected_process.pid,
             expected_process.generation,
             expected_process.boot_id,
         ):
             return HealthResult(False, "process_mismatch")
+        current = now()
         heartbeat = _parse_timestamp(value["heartbeat_at"])
-        if now().tzinfo is None or heartbeat < now() - timedelta(seconds=policy.observation_window_seconds):
+        ready_at = _parse_timestamp(value["ready_at"])
+        if current.tzinfo is None or ready_at > heartbeat or heartbeat > current or heartbeat < current - timedelta(seconds=policy.observation_window_seconds):
             return HealthResult(False, "readiness_stale")
-        _parse_timestamp(value["ready_at"])
     except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError, KeyError, TypeError):
         return HealthResult(False, "readiness_unavailable")
     return HealthResult(True, "ready")
@@ -417,6 +531,16 @@ def _parse_timestamp(value: object) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError("timestamp")
     return parsed
+
+
+def _valid_uuid(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        from uuid import UUID
+        return str(UUID(value)) == value
+    except ValueError:
+        return False
 
 
 class TransactionBoundary(StrEnum):
@@ -435,10 +559,11 @@ class RecoveryDecision:
 def classify_recovery(boundary: TransactionBoundary, *, pre_state_verified: bool) -> RecoveryDecision:
     """Choose recovery without ever reporting an unverified restore as a success."""
     before_new_process = {
-        TransactionBoundary.BEFORE_STOP,
         TransactionBoundary.AFTER_STOP_PRE_START,
         TransactionBoundary.AFTER_MIGRATION_BEFORE_NEW_PROCESS,
     }
+    if boundary is TransactionBoundary.BEFORE_STOP:
+        return RecoveryDecision("untouched")
     if boundary in before_new_process and pre_state_verified:
         return RecoveryDecision("restore_pre_start_state")
     return RecoveryDecision("manual_intervention")

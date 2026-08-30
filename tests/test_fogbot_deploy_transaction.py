@@ -2,9 +2,14 @@
 
 import importlib
 import json
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
+import time
 from datetime import UTC, datetime
+from hashlib import sha256
 
 import pytest
 
@@ -27,6 +32,29 @@ def test_transaction_lock_rejects_contention_and_releases_after_context_exit(tmp
 
     with transaction.DeploymentLock(lock_path):
         pass
+
+
+def test_transaction_lock_rejects_an_independent_process_then_releases(tmp_path):
+    """Catch a lock that appears contended only inside one Python interpreter."""
+    transaction = _transaction_module()
+    lock_path = tmp_path / "transaction.lock"
+    program = (
+        "from pathlib import Path\n"
+        "from deployment.server.fogbot_deploy.transaction import DeploymentLock, TransactionError\n"
+        f"path = Path({str(lock_path)!r})\n"
+        "try:\n"
+        "    with DeploymentLock(path): print('acquired')\n"
+        "except TransactionError as error:\n"
+        "    print(error)"
+    )
+    environment = {**os.environ, "PYTHONPATH": str(Path.cwd())}
+
+    with transaction.DeploymentLock(lock_path):
+        contended = subprocess.run([sys.executable, "-c", program], capture_output=True, check=True, text=True, env=environment)
+    released = subprocess.run([sys.executable, "-c", program], capture_output=True, check=True, text=True, env=environment)
+
+    assert contended.stdout.strip() == "deployment_in_progress"
+    assert released.stdout.strip() == "acquired"
 
 
 def test_fixed_argument_runner_retains_immutable_argv_without_shell_interpolation(tmp_path):
@@ -220,7 +248,7 @@ def test_readiness_evaluator_checks_schema_identity_sha_and_freshness_without_di
 @pytest.mark.parametrize(
     ("boundary", "verified", "action"),
     [
-        ("before_stop", True, "restore_pre_start_state"),
+        ("before_stop", True, "untouched"),
         ("after_stop_pre_start", True, "restore_pre_start_state"),
         ("after_migration_before_new_process", True, "restore_pre_start_state"),
         ("after_new_process_start", True, "manual_intervention"),
@@ -235,3 +263,114 @@ def test_recovery_classification_is_deterministic_at_each_boundary(boundary, ver
     decision = transaction.classify_recovery(transaction.TransactionBoundary(boundary), pre_state_verified=verified)
 
     assert decision.action == action
+
+
+def test_sqlite_backup_rejects_foreign_key_inconsistency_and_accepts_timeout_policy(tmp_path):
+    """Catch a backup that accepts inconsistent relational state or has no timeout policy."""
+    transaction = _transaction_module()
+    source = tmp_path / "inconsistent.db"
+    connection = sqlite3.connect(source)
+    connection.execute("PRAGMA foreign_keys=OFF")
+    connection.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+    connection.execute("CREATE TABLE child (parent_id INTEGER REFERENCES parent(id))")
+    connection.execute("INSERT INTO child VALUES (99)")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(transaction.TransactionError, match="^backup_unavailable$"):
+        transaction.backup_sqlite_database(source, tmp_path / "backup.db", timeout_seconds=1)
+
+
+def test_sqlite_backup_rejects_a_destination_swap_without_deleting_the_foreign_file(tmp_path, monkeypatch):
+    """Catch a backup that validates or removes an object substituted after reservation."""
+    transaction = _transaction_module()
+    source = tmp_path / "source.db"
+    destination = tmp_path / "backup.db"
+    foreign = tmp_path / "foreign.db"
+    for database, value in ((source, "source"), (foreign, "foreign")):
+        connection = sqlite3.connect(database)
+        connection.execute("CREATE TABLE records (value TEXT)")
+        connection.execute("INSERT INTO records VALUES (?)", (value,))
+        connection.commit()
+        connection.close()
+
+    def swap_after_durability(_directory):
+        destination.unlink()
+        foreign.replace(destination)
+
+    monkeypatch.setattr(transaction, "_fsync_directory", swap_after_durability)
+
+    with pytest.raises(transaction.TransactionError, match="^backup_unavailable$"):
+        transaction.backup_sqlite_database(source, destination)
+
+    assert transaction.validate_sqlite_backup(destination).sha256 == sha256(destination.read_bytes()).hexdigest()
+
+
+def test_sqlite_backup_busy_writer_obeys_the_supplied_deadline(tmp_path):
+    """Catch online backup retries that can wait forever behind a real SQLite writer lock."""
+    transaction = _transaction_module()
+    source = tmp_path / "busy.db"
+    writer = sqlite3.connect(source)
+    writer.execute("CREATE TABLE records (value TEXT)")
+    writer.commit()
+    writer.execute("BEGIN EXCLUSIVE")
+    started = time.monotonic()
+    try:
+        with pytest.raises(transaction.TransactionError, match="^backup_unavailable$"):
+            transaction.backup_sqlite_database(source, tmp_path / "backup.db", timeout_seconds=0.05)
+    finally:
+        writer.rollback()
+        writer.close()
+    assert time.monotonic() - started < 1
+
+
+def test_metadata_update_preserves_existing_mode(tmp_path):
+    """Catch an atomic update that makes service-readable configuration inaccessible."""
+    transaction = _transaction_module()
+    path = tmp_path / "configuration.json"
+    path.write_text(json.dumps({"technical_info": {"version": "1.0.0", "last_updated": "2026-01-01"}}), encoding="utf-8")
+    path.chmod(0o640)
+
+    transaction.update_configuration_metadata(path, version="1.2.3", last_updated="2026-08-30")
+
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o777 == 0o640
+    else:
+        # The server primitive's metadata-preservation contract is POSIX-only;
+        # Windows uses the destination directory's ACL policy after replacement.
+        assert json.loads(path.read_text(encoding="utf-8"))["technical_info"]["version"] == "1.2.3"
+
+
+def test_health_policy_and_readiness_reject_invalid_bounds_and_boolean_identity(tmp_path):
+    """Catch health validation that accepts unbounded policy or bool values as identifiers."""
+    transaction = _transaction_module()
+    with pytest.raises(transaction.TransactionError, match="^invalid_health_policy$"):
+        transaction.HealthPolicy(observation_window_seconds=0)
+    path = tmp_path / "ready.json"
+    path.write_text(json.dumps({"schema_version": True, "release_sha": "a" * 40, "pid": True, "generation": "x", "boot_id": "b", "ready_at": "2026-08-30T12:01:00Z", "heartbeat_at": "2026-08-30T12:01:00Z"}), encoding="utf-8")
+
+    assert transaction.evaluate_readiness(path, "a" * 40, now=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC)).ready is False
+
+
+def test_readiness_rejects_uppercase_uuid_even_when_it_is_parseable(tmp_path):
+    """Catch readiness validation that silently normalizes a noncanonical generation UUID."""
+    transaction = _transaction_module()
+    path = tmp_path / "ready.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "release_sha": "a" * 40,
+                "pid": 71,
+                "generation": "123E4567-E89B-12D3-A456-426614174000",
+                "boot_id": "boot-a",
+                "ready_at": "2026-08-30T11:59:00Z",
+                "heartbeat_at": "2026-08-30T11:59:50Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = transaction.evaluate_readiness(path, "a" * 40, now=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC))
+
+    assert result == transaction.HealthResult(False, "readiness_schema_invalid")
