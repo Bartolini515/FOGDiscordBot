@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import os
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -82,6 +83,31 @@ def test_submit_parser_accepts_only_the_exact_approved_grammar():
     ):
         with pytest.raises(protocol.CommandError):
             protocol.parse_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "submit 0123456789abcdef0123456789abcdef01234567 " + "9" * 20 + " 2 22 1.2.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 " + "1" * 10 + ".2.11",
+        "submit 0123456789abcdef0123456789abcdef01234567 71 2 22 " + "1" * 500,
+    ],
+)
+def test_submit_parser_rejects_excessive_numeric_and_version_tokens(command):
+    """Catch a resource-exhaustion regression that accepts oversized identity fields."""
+    protocol = _protocol_module()
+
+    with pytest.raises(protocol.CommandError, match="invalid_command"):
+        protocol.parse_command(command)
+
+
+def test_submit_parser_converts_huge_integer_failures_to_controlled_errors():
+    """Catch a parser regression that lets Python integer limits escape the forced-command boundary."""
+    protocol = _protocol_module()
+    command = "submit 0123456789abcdef0123456789abcdef01234567 " + "9" * 5000 + " 2 22 1.2.11"
+
+    with pytest.raises(protocol.CommandError, match="invalid_command"):
+        protocol.parse_command(command)
 
 
 def test_operation_id_is_stable_and_strictly_lowercase_hex():
@@ -429,6 +455,34 @@ def test_current_rejects_missing_oversized_and_non_regular_configuration(tmp_pat
 
         assert response.exit_code == 4
         assert json.loads(response.stdout) == {"code": "configuration_unavailable", "ok": False}
+
+
+def test_metadata_reader_rejects_path_replacement_before_opening_descriptor(tmp_path, monkeypatch):
+    """Catch a TOCTOU regression that follows a symlink swapped in after path inspection."""
+    metadata = _metadata_module()
+    configuration_path = tmp_path / "configuration.json"
+    replacement_path = tmp_path / "replacement.json"
+    configuration_path.write_text(
+        json.dumps({"technical_info": {"version": "1.2.11", "last_updated": "2026-08-20"}}), encoding="utf-8"
+    )
+    replacement_path.write_text(
+        json.dumps({"technical_info": {"version": "9.9.9", "last_updated": "2026-08-21"}}), encoding="utf-8"
+    )
+    original_open = os.open
+
+    def replace_path_then_open(path, flags, mode=0o777):
+        if os.fspath(path) == os.fspath(configuration_path):
+            configuration_path.unlink()
+            try:
+                configuration_path.symlink_to(replacement_path)
+            except OSError as error:
+                pytest.skip(f"symlink replacement is unavailable: {error.winerror}")
+        return original_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", replace_path_then_open)
+
+    with pytest.raises(metadata.MetadataError, match="configuration_unavailable"):
+        metadata.ProductionMetadataReader(configuration_path).read()
 
 
 def test_repository_does_not_contain_a_github_cd_workflow():

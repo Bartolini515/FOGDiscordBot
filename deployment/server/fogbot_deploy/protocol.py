@@ -12,6 +12,11 @@ OPERATION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 POSITIVE_INTEGER_PATTERN = re.compile(r"[1-9][0-9]*")
 VERSION_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 SHELL_CHARACTERS = frozenset(";&|$`()<>\\\"'*?![]{}~\r\n\t")
+MAXIMUM_COMMAND_LENGTH = 512
+MAXIMUM_TOKEN_LENGTH = 128
+MAXIMUM_NUMERIC_TOKEN_LENGTH = 19
+MAXIMUM_VERSION_COMPONENT_LENGTH = 9
+MAXIMUM_VERSION_LENGTH = MAXIMUM_VERSION_COMPONENT_LENGTH * 3 + 2
 
 
 class CommandError(ValueError):
@@ -29,7 +34,9 @@ class CanonicalVersion:
     value: str
 
     def __post_init__(self) -> None:
-        if not VERSION_PATTERN.fullmatch(self.value):
+        if len(self.value) > MAXIMUM_VERSION_LENGTH or not VERSION_PATTERN.fullmatch(self.value):
+            raise VersionError("invalid_version")
+        if any(len(component) > MAXIMUM_VERSION_COMPONENT_LENGTH for component in self.value.split(".")):
             raise VersionError("invalid_version")
 
 
@@ -68,30 +75,36 @@ CommandRequest = CurrentRequest | SubmitRequest | StatusRequest
 
 def parse_command(command: str | None) -> CommandRequest:
     """Parse one allowed forced command without evaluating any shell syntax."""
-    if not command or any(character in SHELL_CHARACTERS for character in command):
-        raise CommandError("invalid_command")
-    tokens = command.split(" ")
+    try:
+        if not isinstance(command, str) or not command or len(command) > MAXIMUM_COMMAND_LENGTH:
+            raise CommandError("invalid_command")
+        if any(character in SHELL_CHARACTERS for character in command):
+            raise CommandError("invalid_command")
+        tokens = command.split(" ")
+        if any(not token or len(token) > MAXIMUM_TOKEN_LENGTH for token in tokens):
+            raise CommandError("invalid_command")
 
-    if len(tokens) == 1 and tokens[0] == "current":
-        return CurrentRequest()
+        if len(tokens) == 1 and tokens[0] == "current":
+            return CurrentRequest()
 
-    if len(tokens) == 2 and tokens[0] == "status" and OPERATION_ID_PATTERN.fullmatch(tokens[1]):
-        return StatusRequest(operation_id=tokens[1])
+        if len(tokens) == 2 and tokens[0] == "status" and OPERATION_ID_PATTERN.fullmatch(tokens[1]):
+            return StatusRequest(operation_id=tokens[1])
 
-    if len(tokens) == 6 and tokens[0] == "submit" and SHA_PATTERN.fullmatch(tokens[1]):
-        number_tokens = tokens[2:5]
-        if all(POSITIVE_INTEGER_PATTERN.fullmatch(token) for token in number_tokens):
-            try:
-                version = parse_version(tokens[5]).value
-            except VersionError as error:
-                raise CommandError("invalid_command") from error
-            return SubmitRequest(
-                sha=tokens[1],
-                run_id=int(tokens[2]),
-                run_attempt=int(tokens[3]),
-                repository_id=int(tokens[4]),
-                version=version,
-            )
+        if len(tokens) == 6 and tokens[0] == "submit" and SHA_PATTERN.fullmatch(tokens[1]):
+            number_tokens = tokens[2:5]
+            if all(
+                len(token) <= MAXIMUM_NUMERIC_TOKEN_LENGTH and POSITIVE_INTEGER_PATTERN.fullmatch(token)
+                for token in number_tokens
+            ):
+                return SubmitRequest(
+                    sha=tokens[1],
+                    run_id=int(tokens[2]),
+                    run_attempt=int(tokens[3]),
+                    repository_id=int(tokens[4]),
+                    version=parse_version(tokens[5]).value,
+                )
+    except ValueError as error:
+        raise CommandError("invalid_command") from error
 
     raise CommandError("invalid_command")
 

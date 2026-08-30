@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -50,11 +51,15 @@ class ProductionMetadataReader:
 
     def read(self) -> CurrentMetadata:
         """Return redacted current metadata without exposing configuration contents or paths."""
+        descriptor: int | None = None
         try:
-            file_status = self.configuration_path.lstat()
+            descriptor = _open_configuration_descriptor(self.configuration_path)
+            file_status = os.fstat(descriptor)
             if not stat.S_ISREG(file_status.st_mode) or file_status.st_size > MAXIMUM_CONFIGURATION_BYTES:
                 raise MetadataError("configuration_unavailable")
-            with self.configuration_path.open("rb") as stream:
+            stream = os.fdopen(descriptor, "rb", closefd=True)
+            descriptor = None
+            with stream:
                 payload = stream.read(MAXIMUM_CONFIGURATION_BYTES + 1)
             if len(payload) > MAXIMUM_CONFIGURATION_BYTES:
                 raise MetadataError("configuration_unavailable")
@@ -71,3 +76,38 @@ class ProductionMetadataReader:
             return CurrentMetadata(version, last_updated)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, MetadataError) as error:
             raise MetadataError("configuration_unavailable") from error
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+
+def _open_configuration_descriptor(configuration_path: Path) -> int:
+    """Open one configuration descriptor without following a replacement symlink."""
+    if os.name == "posix":
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        close_on_exec = getattr(os, "O_CLOEXEC", None)
+        if no_follow is None or close_on_exec is None:
+            raise MetadataError("configuration_unavailable")
+        return os.open(configuration_path, os.O_RDONLY | no_follow | close_on_exec)
+
+    if os.name == "nt":
+        initial_status = configuration_path.lstat()
+        if not stat.S_ISREG(initial_status.st_mode):
+            raise MetadataError("configuration_unavailable")
+        descriptor = os.open(configuration_path, os.O_RDONLY | getattr(os, "O_NOINHERIT", 0))
+        try:
+            os.set_inheritable(descriptor, False)
+            opened_status = os.fstat(descriptor)
+            if not stat.S_ISREG(opened_status.st_mode) or not _same_file(initial_status, opened_status):
+                raise MetadataError("configuration_unavailable")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    raise MetadataError("configuration_unavailable")
+
+
+def _same_file(first: os.stat_result, second: os.stat_result) -> bool:
+    """Return whether path inspection and descriptor inspection identify one file."""
+    return first.st_dev == second.st_dev and first.st_ino == second.st_ino
