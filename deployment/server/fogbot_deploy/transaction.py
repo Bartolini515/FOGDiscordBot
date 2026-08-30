@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -29,6 +30,7 @@ SHELL_CHARACTERS = frozenset(";&|$`()<>\\\"'*?![]{}~\r\n\t")
 MAXIMUM_CONFIGURATION_BYTES = 64 * 1024
 MAXIMUM_READINESS_BYTES = 16 * 1024
 MAXIMUM_SQLITE_BYTES = 128 * 1024 * 1024
+MAXIMUM_TIMEOUT_SECONDS = 3600
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
@@ -128,10 +130,13 @@ def _validate_command(
         or not os.fspath(cwd)
         or not all(isinstance(value, str) and value and not any(char in SHELL_CHARACTERS for char in value) for value in argv)
         or not all(isinstance(key, str) and isinstance(value, str) for key, value in environment.items())
-        or not isinstance(timeout_seconds, (int, float))
-        or timeout_seconds <= 0
+        or not _valid_timeout(timeout_seconds)
     ):
         raise TransactionError("invalid_command")
+
+
+def _valid_timeout(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 < value <= MAXIMUM_TIMEOUT_SECONDS
 
 
 class DeploymentLock:
@@ -323,16 +328,19 @@ def backup_sqlite_database(source: Path, destination: Path, *, timeout_seconds: 
     used to read the returned backup.
     """
     destination_status: os.stat_result | None = None
+    temporary_descriptor: int | None = None
     temporary_path: Path | None = None
     temporary_status: os.stat_result | None = None
     try:
+        _assert_trusted_directory(source.parent)
+        _assert_trusted_directory(destination.parent)
         source_status = _assert_regular_file(source)
-        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+        if not _valid_timeout(timeout_seconds):
             raise ValueError
         deadline = time.monotonic() + timeout_seconds
-        with tempfile.NamedTemporaryFile(mode="xb", dir=destination.parent, prefix=f".{destination.name}.", suffix=".sqlite", delete=False) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary_status = os.fstat(temporary.fileno())
+        temporary_descriptor, temporary_name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.", suffix=".sqlite")
+        temporary_path = Path(temporary_name)
+        temporary_status = os.fstat(temporary_descriptor)
         source_connection = sqlite3.connect(f"{source.absolute().as_uri()}?mode=ro", uri=True, timeout=timeout_seconds)
         temporary_connection = sqlite3.connect(temporary_path, timeout=timeout_seconds)
         try:
@@ -350,9 +358,11 @@ def backup_sqlite_database(source: Path, destination: Path, *, timeout_seconds: 
         finally:
             temporary_connection.close()
             source_connection.close()
-        if not _same_file(source_status, source.lstat()):
+        if not _same_file(source_status, source.lstat()) or not _same_file(temporary_status, temporary_path.lstat()):
             raise OSError("replaced source")
-        payload, _ = _read_regular_bytes(temporary_path, MAXIMUM_SQLITE_BYTES)
+        os.fsync(temporary_descriptor)
+        os.lseek(temporary_descriptor, 0, os.SEEK_SET)
+        payload = _read_all(temporary_descriptor, MAXIMUM_SQLITE_BYTES)
         _validate_sqlite_bytes(payload)
         descriptor = os.open(
             destination,
@@ -381,6 +391,8 @@ def backup_sqlite_database(source: Path, destination: Path, *, timeout_seconds: 
             _unlink_if_same(destination, destination_status)
         raise TransactionError("backup_unavailable") from None
     finally:
+        if temporary_descriptor is not None:
+            os.close(temporary_descriptor)
         if temporary_path is not None and temporary_status is not None:
             _unlink_if_same(temporary_path, temporary_status)
 
@@ -454,6 +466,34 @@ def _assert_regular_file(path: Path) -> os.stat_result:
     if not stat.S_ISREG(status.st_mode):
         raise OSError("unsafe input")
     return status
+
+
+def _assert_trusted_directory(path: Path) -> os.stat_result:
+    """Require a non-symlink directory that an untrusted principal cannot rename within.
+
+    On the Linux deployment host the transaction helper runs as the directory owner
+    (root), and group/other write bits are forbidden. This is the immutable-name
+    contract needed because SQLite's standard-library API opens the source by path to
+    support WAL sidecars. Windows has no portable uid/ACL equivalent in the standard
+    library; its local-development policy is descriptor/lstat validation only.
+    """
+    initial = path.lstat()
+    if not stat.S_ISDIR(initial.st_mode):
+        raise OSError("unsafe directory")
+    if os.name != "posix":
+        return initial
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode) or not _same_file(initial, opened):
+            raise OSError("unsafe directory")
+        if opened.st_uid != os.geteuid() or stat.S_IMODE(opened.st_mode) & 0o022:
+            raise OSError("untrusted directory")
+        return opened
+    finally:
+        os.close(descriptor)
 
 
 def _digest_file(path: Path) -> str:

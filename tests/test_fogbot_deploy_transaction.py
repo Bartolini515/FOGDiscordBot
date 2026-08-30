@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import math
 import os
 from pathlib import Path
 import sqlite3
@@ -322,6 +323,72 @@ def test_sqlite_backup_busy_writer_obeys_the_supplied_deadline(tmp_path):
         writer.rollback()
         writer.close()
     assert time.monotonic() - started < 1
+
+
+def test_sqlite_backup_does_not_read_a_replaced_temporary_snapshot_by_name(tmp_path, monkeypatch):
+    """Catch a closed private snapshot descriptor that can be replaced before validation."""
+    transaction = _transaction_module()
+    source = tmp_path / "source.db"
+    foreign = tmp_path / "foreign.db"
+    for database, value in ((source, "source"), (foreign, "foreign")):
+        connection = sqlite3.connect(database)
+        connection.execute("CREATE TABLE records (value TEXT)")
+        connection.execute("INSERT INTO records VALUES (?)", (value,))
+        connection.commit()
+        connection.close()
+    foreign_digest = sha256(foreign.read_bytes()).hexdigest()
+    read_regular_bytes = transaction._read_regular_bytes
+
+    def replace_closed_snapshot(path, maximum):
+        if path.name.startswith(".backup.db."):
+            path.unlink()
+            foreign.replace(path)
+        return read_regular_bytes(path, maximum)
+
+    monkeypatch.setattr(transaction, "_read_regular_bytes", replace_closed_snapshot)
+
+    identity = transaction.backup_sqlite_database(source, tmp_path / "backup.db")
+
+    assert identity.sha256 != foreign_digest
+    assert transaction.validate_sqlite_backup(tmp_path / "backup.db") == identity
+
+
+@pytest.mark.skipif(os.name != "posix", reason="immutable directory ownership/mode is a POSIX deployment contract")
+def test_sqlite_backup_rejects_a_source_parent_that_permits_name_swaps(tmp_path):
+    """Catch source opening through a directory writable by an untrusted principal."""
+    transaction = _transaction_module()
+    source = tmp_path / "source.db"
+    connection = sqlite3.connect(source)
+    connection.execute("CREATE TABLE records (value TEXT)")
+    connection.commit()
+    connection.close()
+    tmp_path.chmod(0o777)
+
+    with pytest.raises(transaction.TransactionError, match="^backup_unavailable$"):
+        transaction.backup_sqlite_database(source, tmp_path / "backup.db")
+
+
+@pytest.mark.parametrize("timeout_seconds", [True, math.nan, math.inf, -math.inf, 3601])
+def test_backup_and_command_boundary_reject_nonfinite_or_unbounded_timeouts(tmp_path, timeout_seconds):
+    """Catch timeout inputs that bypass deadlines or reach a runner as NaN/infinity."""
+    transaction = _transaction_module()
+    source = tmp_path / "source.db"
+    connection = sqlite3.connect(source)
+    connection.execute("CREATE TABLE records (value TEXT)")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(transaction.TransactionError, match="^backup_unavailable$"):
+        transaction.backup_sqlite_database(source, tmp_path / "backup.db", timeout_seconds=timeout_seconds)
+    with pytest.raises(transaction.TransactionError, match="^invalid_command$"):
+        transaction.execute_command(
+            object(),
+            executable=Path("/opt/fogbot/bin/check"),
+            argv=("--check",),
+            environment={},
+            cwd=tmp_path,
+            timeout_seconds=timeout_seconds,
+        )
 
 
 def test_metadata_update_preserves_existing_mode(tmp_path):
