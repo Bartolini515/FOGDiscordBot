@@ -24,6 +24,21 @@ DEBUG=False
 
 `DISCORD_BOT_TOKEN` is passed to `bot.run(...)`. `DEBUG` enables additional diagnostic behavior only when its value is exactly `True`. Never put either setting in the JSON example, tests, logs, screenshots, or commits.
 
+## Runtime paths
+
+The deployment runtime accepts exactly six path variables. Every value consumed by the application is resolved to an absolute path. Production configuration must supply absolute overrides; local development may use relative values only through its explicitly selected local base.
+
+| Variable | Local default | Purpose |
+| --- | --- | --- |
+| `FOGBOT_CONFIG_PATH` | `configuration.json` | Mutable JSON configuration. |
+| `FOGBOT_DB_PATH` | `db/bot.db` | SQLite database location. |
+| `FOGBOT_LOG_DIR` | `logs` | Directory for the rotating application log. |
+| `FOGBOT_RUNTIME_DIR` | `.runtime` | Runtime-only lock and readiness state directory. |
+| `FOGBOT_RELEASE_FILE` | `RELEASE_SHA` | File containing the deployed full 40-character release SHA. |
+| `FOGBOT_INSTANCE_LOCK` | `<runtime dir>/instance.lock` | Single-instance lock file. |
+
+The runtime writes `<runtime dir>/ready.json` only after Discord readiness and membership reconciliation. It records a schema version, release SHA (or `unknown` in local development), PID, generation, boot identifier, and UTC ready/heartbeat timestamps. Heartbeats refresh every 10 seconds; a future health check treats records older than 30 seconds as stale. The JSON file is runtime state, not configuration, and must not be edited manually.
+
 ## Required top-level shape
 
 | Field | Type | Purpose |
