@@ -43,7 +43,8 @@ def _layout(tmp_path: Path):
     module = _module()
     shared = tmp_path / "shared"
     state = tmp_path / "state"
-    for directory in (tmp_path / "releases", shared, state, state / "operations", state / "backups"):
+    source_repository = tmp_path / "source.git"
+    for directory in (tmp_path / "releases", shared, state, state / "operations", state / "backups", source_repository):
         directory.mkdir(parents=True, exist_ok=True)
     configuration = shared / "configuration.json"
     if not configuration.exists():
@@ -59,6 +60,7 @@ def _layout(tmp_path: Path):
         marker.write_text("a" * 40 + "\n", encoding="ascii")
     return module.ServerLayout(
         releases=tmp_path / "releases",
+        source_repository=source_repository,
         shared=shared,
         state=state,
         operations=state / "operations",
@@ -66,6 +68,7 @@ def _layout(tmp_path: Path):
         configuration=configuration,
         database=database,
         readiness=state / "readiness.json",
+        instance_lock=state / "instance.lock",
         sha_marker=marker,
     )
 
@@ -125,6 +128,10 @@ class Fakes:
                 events.append("stop")
                 if failure == "stop":
                     raise module.DeploymentFailure("stop_failed")
+                if failure == "stop-connection-loss":
+                    self_outer.active = False
+                    transaction = importlib.import_module("deployment.server.fogbot_deploy.transaction")
+                    raise transaction.TransactionError("command_timeout")
                 self_outer.active = False
 
             def start(self, timeout_seconds):
@@ -191,7 +198,7 @@ class Fakes:
                 return datetime(2026, 8, 30, 23, 30, tzinfo=UTC)
 
         class Health:
-            def observe(self, expected_sha, expected_process, policy):
+            def observe(self, expected_sha, policy):
                 events.append(f"observe:{expected_sha}")
                 return self_outer.ready and failure != "health"
 
@@ -233,7 +240,7 @@ def test_successful_transaction_uses_exact_sha_redacts_result_and_updates_only_t
     assert fakes.events == [
         f"existing:{SHA}", "service-status", f"prepare:{SHA}", "verify-release", "preflight-no-network", "revalidate",
         "stop", "service-status", "process-free", "instance-lock", "read-current", "rehearse", "apply",
-        "validate-migrations", "read-current", f"switch:{SHA}", "start", "service-status", "identity", f"observe:{SHA}",
+        "validate-migrations", "read-current", f"switch:{SHA}", "read-current", "start", "service-status", f"observe:{SHA}", "identity",
     ]
     assert str(make_layout(tmp_path).shared) not in outcome.diagnostic_code
 
@@ -243,9 +250,9 @@ def test_layout_rejects_relative_and_traversal_paths_before_any_preparation(tmp_
     module = _module()
     layout = _layout(tmp_path)
     unsafe = module.ServerLayout(
-        releases=Path("relative/releases"), shared=layout.shared, state=layout.state, operations=layout.operations,
+        releases=Path("relative/releases"), source_repository=layout.source_repository, shared=layout.shared, state=layout.state, operations=layout.operations,
         backups=layout.backups, configuration=layout.configuration, database=layout.database,
-        readiness=layout.readiness, sha_marker=layout.sha_marker,
+        readiness=layout.readiness, instance_lock=layout.instance_lock, sha_marker=layout.sha_marker,
     )
     record, store = _record(tmp_path)
     store.create_or_read(record)
@@ -272,6 +279,45 @@ def test_stop_exclusion_failure_keeps_current_release_and_recovers_before_start(
     assert outcome == _module().DeploymentOutcome(False, "recovered")
     assert not any(event.startswith("switch:") for event in fakes.events)
     assert store.read("a" * 32).diagnostic_code == "recovered"
+
+
+def test_ambiguous_stop_connection_loss_reconciles_inactive_service_and_recovers(tmp_path):
+    """Catch a timeout after systemd accepted stop that is incorrectly recorded as an untouched pre-stop failure."""
+    outcome, store, fakes, _ = _run(tmp_path, failure="stop-connection-loss")
+
+    assert outcome == _module().DeploymentOutcome(False, "recovered")
+    assert fakes.events.count("service-status") >= 3
+    assert "start" in fakes.events
+    assert store.read("a" * 32).diagnostic_code == "recovered"
+
+
+def test_resume_reconciles_a_durable_switch_journal_and_recovers_an_inactive_service(tmp_path):
+    """Catch a switch interruption that is recorded as an ordinary service-state failure while the bot remains stopped."""
+    module = _module()
+    record, store = _record(tmp_path)
+    store.create_or_read(record)
+    layout = _layout(tmp_path)
+    old_sha = "b" * 40
+    layout.sha_marker.write_text(f"{old_sha}\n", encoding="ascii")
+    fakes = Fakes(module=module, events=[], active=False, switched=SHA, release_root=layout.releases)
+    module._write_switch_journal(module._switch_journal_path(layout.sha_marker), old_sha, old_sha, SHA)
+
+    outcome = module.DeploymentOrchestrator(layout, store, fakes.dependencies()).run(record.operation_id)
+
+    assert outcome == module.DeploymentOutcome(False, "recovered")
+    assert fakes.events.index(f"restore-link:{SHA}") < fakes.events.index("start")
+    assert "existing:" not in " ".join(fakes.events)
+    assert layout.sha_marker.read_text(encoding="ascii") == f"{SHA}\n"
+    assert not module._switch_journal_path(layout.sha_marker).exists()
+    assert store.read(record.operation_id).diagnostic_code == "recovered"
+
+
+def test_orchestrator_observes_startup_readiness_before_reading_process_identity(tmp_path):
+    """Catch normal startup latency being rejected because identity reads the absent readiness file before health polling begins."""
+    outcome, _, fakes, _ = _run(tmp_path)
+
+    assert outcome == _module().DeploymentOutcome(True, "completed")
+    assert fakes.events.index(f"observe:{SHA}") < fakes.events.index("identity")
 
 
 @pytest.mark.parametrize("failure", ["rehearse", "apply", "migration-validation", "switch"])
@@ -347,6 +393,8 @@ def test_fixed_argv_adapters_keep_systemctl_git_pipenv_and_migration_calls_shell
         def run(self, executable, argv, environment, cwd, timeout_seconds):
             self.calls.append((executable, argv, environment, cwd, timeout_seconds))
             transaction = importlib.import_module("deployment.server.fogbot_deploy.transaction")
+            if argv[-2:] == ("-t", SHA):
+                return transaction.RawCommandResult(0, b"commit\n", b"")
             return transaction.RawCommandResult(0, SHA.encode(), b"")
 
     runner = Runner()
@@ -359,7 +407,9 @@ def test_fixed_argv_adapters_keep_systemctl_git_pipenv_and_migration_calls_shell
 
     assert [call[1] for call in runner.calls] == [
         ("stop", "fogbot.service"),
-        ("worktree", "add", "--detach", layout.releases.joinpath(SHA).as_posix(), SHA),
+        ("-C", layout.source_repository.as_posix(), "rev-parse", "--git-dir"),
+        ("-C", layout.source_repository.as_posix(), "cat-file", "-t", SHA),
+        ("-C", layout.source_repository.as_posix(), "worktree", "add", "--detach", layout.releases.joinpath(SHA).as_posix(), SHA),
         ("-C", layout.releases.joinpath(SHA).as_posix(), "rev-parse", "HEAD"),
         ("-m", "scripts.migrate", "--database", str(database), "--migrations", layout.releases.joinpath(SHA, "db", "migrations").as_posix()),
     ]

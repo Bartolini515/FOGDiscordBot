@@ -76,6 +76,7 @@ class ServerLayout:
     """Immutable, caller-provided filesystem shape for the root-owned server helper."""
 
     releases: Path
+    source_repository: Path
     shared: Path
     state: Path
     operations: Path
@@ -83,6 +84,7 @@ class ServerLayout:
     configuration: Path
     database: Path
     readiness: Path
+    instance_lock: Path
     sha_marker: Path
     minimum_free_bytes: int = 512 * 1024 * 1024
 
@@ -90,6 +92,7 @@ class ServerLayout:
         """Fail before mutation unless all server paths satisfy the Linux layout contract."""
         values = (
             self.releases,
+            self.source_repository,
             self.shared,
             self.state,
             self.operations,
@@ -97,6 +100,7 @@ class ServerLayout:
             self.configuration,
             self.database,
             self.readiness,
+            self.instance_lock,
             self.sha_marker,
         )
         if not isinstance(self.minimum_free_bytes, int) or isinstance(self.minimum_free_bytes, bool) or self.minimum_free_bytes < 0:
@@ -109,11 +113,12 @@ class ServerLayout:
             and _below(self.configuration, self.shared)
             and _below(self.database, self.shared)
             and _below(self.readiness, self.state)
+            and _below(self.instance_lock, self.state)
             and _below(self.sha_marker, self.state)
         ):
             raise DeploymentFailure("layout_invalid")
         try:
-            for directory in (self.releases, self.shared, self.state, self.operations, self.backups):
+            for directory in (self.releases, self.source_repository, self.shared, self.state, self.operations, self.backups):
                 _trusted_directory(directory)
             for file_path in (self.configuration, self.database):
                 _regular_file(file_path)
@@ -164,7 +169,7 @@ class Clock(Protocol):
 
 
 class HealthObserver(Protocol):
-    def observe(self, expected_sha: str, expected_process: ProcessIdentity, policy: HealthPolicy) -> bool: ...
+    def observe(self, expected_sha: str, policy: HealthPolicy) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,11 +212,35 @@ class DeploymentOrchestrator:
             return DeploymentOutcome(False, "state_invalid")
         try:
             with DeploymentLock(self._layout.state / "deployment.lock"):
+                if _switch_journal_path(self._layout.sha_marker).exists():
+                    try:
+                        reconcile_release_and_marker(self._dependencies.switcher, self._layout.sha_marker)
+                    except DeploymentFailure:
+                        self._persist_final(record, "manual_intervention", "manual_intervention_required")
+                        return DeploymentOutcome(False, "manual_intervention_required")
+                    return self._resume_interrupted_switch(record)
                 return self._run_locked(record)
         except TransactionError as error:
             return DeploymentOutcome(False, _safe_code(str(error), "deployment_in_progress"))
         except Exception:
             return DeploymentOutcome(False, "preparation_failed")
+
+    def _resume_interrupted_switch(self, record: OperationRecord) -> DeploymentOutcome:
+        """Return the bot to a verified running state after a journaled pre-start interruption."""
+        try:
+            if not self._dependencies.service.is_active(self._policy.stop_timeout_seconds):
+                self._dependencies.service.start(self._policy.startup_timeout_seconds)
+            if not self._dependencies.service.is_active(self._policy.startup_timeout_seconds):
+                raise DeploymentFailure("start_failed")
+            if not self._dependencies.health.observe(record.target["sha"], self._policy):
+                raise DeploymentFailure("health_check_failed")
+            if self._dependencies.processes.identity(self._policy.startup_timeout_seconds) is None:
+                raise DeploymentFailure("health_check_failed")
+        except (DeploymentFailure, TransactionError, OSError, ValueError, TypeError):
+            self._persist_final(record, "manual_intervention", "manual_intervention_required")
+            return DeploymentOutcome(False, "manual_intervention_required")
+        self._persist_final(record, "failed", "recovered")
+        return DeploymentOutcome(False, "recovered")
 
     def _run_locked(self, record: OperationRecord) -> DeploymentOutcome:
         release: ReleaseIdentity | None = None
@@ -238,8 +267,13 @@ class DeploymentOrchestrator:
             record = self._persist(record, "stopping", "pending")
             try:
                 self._dependencies.service.stop(self._policy.stop_timeout_seconds)
-            except (DeploymentFailure, OSError, ValueError, TypeError):
-                if not self._dependencies.service.is_active(self._policy.stop_timeout_seconds):
+            except (DeploymentFailure, TransactionError, OSError, ValueError, TypeError):
+                try:
+                    service_still_active = self._dependencies.service.is_active(self._policy.stop_timeout_seconds)
+                except (DeploymentFailure, TransactionError, OSError, ValueError, TypeError):
+                    self._persist_final(record, "manual_intervention", "manual_intervention_required")
+                    return DeploymentOutcome(False, "manual_intervention_required")
+                if not service_still_active:
                     stopped = True
                     record = self._persist(record, "stopped", "pending")
                 raise DeploymentFailure("stop_failed") from None
@@ -258,7 +292,7 @@ class DeploymentOrchestrator:
                 "pending",
                 previous_release=snapshot.previous_release,
                 previous_marker_sha=snapshot.previous_marker_sha,
-                backup_release_id=snapshot.configuration.filename,
+                backup_configuration_id=snapshot.configuration.filename,
                 backup_database_id=snapshot.database.filename,
             )
             warsaw_date = self._warsaw_date()
@@ -281,8 +315,9 @@ class DeploymentOrchestrator:
             self._dependencies.service.start(self._policy.startup_timeout_seconds)
             if not self._dependencies.service.is_active(self._policy.startup_timeout_seconds):
                 raise DeploymentFailure("start_failed")
-            process = self._dependencies.processes.identity(self._policy.startup_timeout_seconds)
-            if process is None or not self._dependencies.health.observe(release.sha, process, self._policy):
+            if not self._dependencies.health.observe(release.sha, self._policy):
+                raise DeploymentFailure("health_check_failed")
+            if self._dependencies.processes.identity(self._policy.startup_timeout_seconds) is None:
                 raise DeploymentFailure("health_check_failed")
             record = self._persist(record, "health_check", "pending")
             self._persist(record, "succeeded", "completed", result="success", deployment_date=warsaw_date, deployed_release_id=release.release_id)
@@ -385,11 +420,10 @@ class DeploymentOrchestrator:
             self._persist_final(record, "failed", code)
             return DeploymentOutcome(False, code)
         if new_process_started:
-            if new_process_started:
-                try:
-                    self._dependencies.service.stop(self._policy.stop_timeout_seconds)
-                except (DeploymentFailure, OSError, ValueError, TypeError):
-                    pass
+            try:
+                self._dependencies.service.stop(self._policy.stop_timeout_seconds)
+            except (DeploymentFailure, TransactionError, OSError, ValueError, TypeError):
+                pass
             self._persist_final(record, "manual_intervention", "manual_intervention_required")
             return DeploymentOutcome(False, "manual_intervention_required")
         if snapshot is None:
@@ -448,8 +482,26 @@ class _FixedPreparer:
             if self.existing_identity(sha) == sha:
                 return ReleaseIdentity(sha, sha, path)
             raise DeploymentFailure("release_conflict")
-        _require(_fixed(self._runner, "/usr/bin/git", ("worktree", "add", "--detach", _arg_path(path), sha), self._layout.releases.parent, timeout_seconds), "release_preparation_failed")
-        path.mkdir(mode=0o750, parents=True, exist_ok=True)
+        source = self._layout.source_repository
+        _require(
+            _fixed(self._runner, "/usr/bin/git", ("-C", _arg_path(source), "rev-parse", "--git-dir"), source, timeout_seconds),
+            "release_preparation_failed",
+        )
+        commit_type = execute_command(
+            self._runner,
+            executable=Path("/usr/bin/git"),
+            argv=("-C", _arg_path(source), "cat-file", "-t", sha),
+            environment={"LANG": "C"},
+            cwd=source,
+            timeout_seconds=timeout_seconds,
+            redact=lambda value: value.strip(),
+        )
+        if commit_type.category != "ok" or commit_type.stdout != "commit":
+            raise DeploymentFailure("release_preparation_failed")
+        _require(
+            _fixed(self._runner, "/usr/bin/git", ("-C", _arg_path(source), "worktree", "add", "--detach", _arg_path(path), sha), source, timeout_seconds),
+            "release_preparation_failed",
+        )
         release = ReleaseIdentity(sha, sha, path)
         if not self.verify(release):
             raise DeploymentFailure("release_identity_invalid")
@@ -467,9 +519,21 @@ class _FixedPreparer:
         compile_result = _fixed(self._runner, "/usr/local/bin/pipenv", ("run", "python", "-m", "compileall", "."), release.path, timeout_seconds, environment)
         return python == "ok" and sync == "ok" and compile_result == "ok"
     def cleanup(self, release_id: str) -> None:
-        # Destructive release removal is deliberately delegated to a separately
-        # approved root helper; this adapter only accepts the exact release name.
         if not SHA_PATTERN.fullmatch(release_id):
+            return
+        path = self._layout.releases / release_id
+        try:
+            status = path.lstat()
+            if not stat.S_ISDIR(status.st_mode) or stat.S_ISLNK(status.st_mode):
+                return
+            _fixed(
+                self._runner,
+                "/usr/bin/git",
+                ("-C", _arg_path(self._layout.source_repository), "worktree", "remove", "--force", _arg_path(path)),
+                self._layout.source_repository,
+                60,
+            )
+        except OSError:
             return
 
 
@@ -491,28 +555,75 @@ class _FixedProcesses:
     def __init__(self, layout: ServerLayout, runner: CommandRunner): self._layout, self._runner = layout, runner
     def no_bot_process(self, timeout_seconds: int) -> bool:
         result = execute_command(self._runner, executable=Path("/bin/systemctl"), argv=("show", "fogbot.service", "--property=MainPID", "--value"), environment={"LANG": "C"}, cwd=self._layout.state, timeout_seconds=timeout_seconds, redact=lambda value: value.strip())
-        return result.category == "ok" and result.stdout == "0"
-    def acquire_instance_lock(self, timeout_seconds: int) -> bool:
-        return _fixed(self._runner, "/usr/bin/flock", ("-n", "/run/fogbot/instance.lock", "/usr/bin/true"), self._layout.state, timeout_seconds) == "ok"
-    def identity(self, timeout_seconds: int) -> ProcessIdentity | None:
+        if result.category != "ok" or result.stdout != "0":
+            return False
         try:
-            payload, _ = _read_regular_bytes(self._layout.readiness, 16 * 1024)
-            value = json.loads(payload.decode("utf-8"))
-            return ProcessIdentity(value["pid"], value["generation"], value["boot_id"])
-        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            found = self._runner.run(
+                Path("/usr/bin/pgrep"),
+                ("-f", "--", "python.*(fogbot|main\\.py)|fogbot"),
+                {"LANG": "C"},
+                self._layout.state,
+                timeout_seconds,
+            )
+            return found.exit_code == 1
+        except (OSError, ValueError, TypeError):
+            return False
+    def acquire_instance_lock(self, timeout_seconds: int) -> bool:
+        return _fixed(self._runner, "/usr/bin/flock", ("-n", _arg_path(self._layout.instance_lock), "/usr/bin/true"), self._layout.state, timeout_seconds) == "ok"
+    def identity(self, timeout_seconds: int) -> ProcessIdentity | None:
+        readiness_identity = _readiness_process_identity(self._layout.readiness)
+        if readiness_identity is None:
             return None
+        result = execute_command(
+            self._runner,
+            executable=Path("/bin/systemctl"),
+            argv=("show", "fogbot.service", "--property=MainPID", "--value"),
+            environment={"LANG": "C"},
+            cwd=self._layout.state,
+            timeout_seconds=timeout_seconds,
+            redact=lambda value: value.strip(),
+        )
+        try:
+            main_pid = int(result.stdout)
+        except ValueError:
+            return None
+        if result.category != "ok" or main_pid <= 0 or readiness_identity.pid != main_pid:
+            return None
+        return readiness_identity
 
 
 class _FixedHealth:
-    def __init__(self, layout: ServerLayout): self._layout = layout
-    def observe(self, expected_sha: str, expected_process: ProcessIdentity, policy: HealthPolicy) -> bool:
-        deadline = time.monotonic() + policy.observation_window_seconds
+    def __init__(self, layout: ServerLayout, monotonic: object = time.monotonic, sleeper: object = time.sleep):
+        self._layout, self._monotonic, self._sleeper = layout, monotonic, sleeper
+    def observe(self, expected_sha: str, policy: HealthPolicy) -> bool:
+        startup_deadline = self._monotonic() + policy.startup_timeout_seconds  # type: ignore[operator]
+        while True:
+            if evaluate_readiness(self._layout.readiness, expected_sha, now=lambda: datetime.now(UTC), policy=policy).ready:
+                break
+            remaining = startup_deadline - self._monotonic()  # type: ignore[operator]
+            if remaining <= 0:
+                return False
+            self._sleeper(min(1, remaining))  # type: ignore[operator]
+        expected_process = _readiness_process_identity(self._layout.readiness)
+        if expected_process is None:
+            return False
+        observation_deadline = self._monotonic() + policy.observation_window_seconds  # type: ignore[operator]
         while True:
             if not evaluate_readiness(self._layout.readiness, expected_sha, now=lambda: datetime.now(UTC), expected_process=expected_process, policy=policy).ready:
                 return False
-            if time.monotonic() >= deadline:
+            remaining = observation_deadline - self._monotonic()  # type: ignore[operator]
+            if remaining <= 0:
                 return True
-            time.sleep(min(1, max(0.01, deadline - time.monotonic())))
+            self._sleeper(min(1, remaining))  # type: ignore[operator]
+
+
+def _readiness_process_identity(path: Path) -> ProcessIdentity | None:
+    try:
+        payload, _ = _read_regular_bytes(path, 16 * 1024)
+        value = json.loads(payload.decode("utf-8"))
+        return ProcessIdentity(value["pid"], value["generation"], value["boot_id"])
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,6 +632,9 @@ class FixedArgAdapters:
 
     layout: ServerLayout
     runner: CommandRunner
+
+    def __post_init__(self) -> None:
+        self.layout.validate()
 
     @property
     def service(self) -> _FixedService: return _FixedService(self.runner, self.layout.releases.parent)
@@ -710,21 +824,126 @@ def _read_sha_marker(path: Path) -> str:
 
 
 def switch_release_and_marker(switcher: ReleaseSwitcher, marker: Path, release: ReleaseIdentity) -> None:
-    """Keep current/marker coherent while service is stopped and the transaction lock is held."""
+    """Switch a journaled release identity; interruptions are reconciled before any later action."""
+    reconcile_release_and_marker(switcher, marker)
     old_release = switcher.current_release_id()
     old_marker = _read_sha_marker(marker)
+    journal = _switch_journal_path(marker)
+    _write_switch_journal(journal, old_release, old_marker, release.sha)
     try:
         switcher.switch(release)
         _write_sha_marker(marker, release.sha)
+        if switcher.current_release_id() != release.sha or _read_sha_marker(marker) != release.sha:
+            raise ValueError
     except (DeploymentFailure, OSError, ValueError):
         try:
             switcher.restore(old_release)
             _write_sha_marker(marker, old_marker)
             if switcher.current_release_id() != old_release or _read_sha_marker(marker) != old_marker:
                 raise ValueError
+            _mark_switch_journal_rolled_back(journal, old_release, old_marker, release.sha)
+            _clear_switch_journal(journal)
         except (DeploymentFailure, OSError, ValueError):
             raise DeploymentFailure("manual_intervention_required") from None
         raise DeploymentFailure("switch_failed") from None
+    _clear_switch_journal(journal)
+
+
+def reconcile_release_and_marker(switcher: ReleaseSwitcher, marker: Path) -> None:
+    """Complete a durably-intended switch after interruption without guessing an identity."""
+    journal = _switch_journal_path(marker)
+    if not journal.exists():
+        return
+    old_release, old_marker, intended_release, state = _read_switch_journal(journal)
+    try:
+        current_release = switcher.current_release_id()
+        current_marker = _read_sha_marker(marker)
+        if current_release == intended_release and current_marker == intended_release:
+            _clear_switch_journal(journal)
+            return
+        if state == "rolled_back" and current_release == old_release and current_marker == old_marker:
+            _clear_switch_journal(journal)
+            return
+        if state == "rolled_back":
+            raise ValueError
+        # A journal is written and fsynced before either public identity changes.
+        # Any mixed identity is completed to the sole durable target rather than
+        # guessing a prior state after a crash between the two replacements.
+        switcher.restore(intended_release)
+        _write_sha_marker(marker, intended_release)
+        if switcher.current_release_id() != intended_release or _read_sha_marker(marker) != intended_release:
+            raise ValueError
+        _clear_switch_journal(journal)
+    except (DeploymentFailure, OSError, ValueError):
+        raise DeploymentFailure("manual_intervention_required") from None
+
+
+def _switch_journal_path(marker: Path) -> Path:
+    return marker.with_name(f".{marker.name}.switch.json")
+
+
+def _write_switch_journal(path: Path, old_release: str, old_marker: str, intended_release: str, *, state: str = "switching") -> None:
+    if (
+        not isinstance(old_release, str)
+        or not 1 <= len(old_release) <= 128
+        or not SHA_PATTERN.fullmatch(old_marker)
+        or not SHA_PATTERN.fullmatch(intended_release)
+        or state not in {"switching", "rolled_back"}
+    ):
+        raise DeploymentFailure("switch_failed")
+    _write_private(
+        path,
+        json.dumps(
+            {
+                "previous_release": old_release,
+                "previous_marker_sha": old_marker,
+                "intended_release_sha": intended_release,
+                "state": state,
+            },
+            separators=(",", ":"),
+        ).encode("ascii"),
+    )
+
+
+def _read_switch_journal(path: Path) -> tuple[str, str, str, str]:
+    try:
+        payload, _ = _read_regular_bytes(path, 1024)
+        value = json.loads(payload.decode("ascii"))
+        legacy_fields = {"previous_release", "previous_marker_sha", "intended_release_sha"}
+        current_fields = legacy_fields | {"state"}
+        keys = set(value) if isinstance(value, dict) else set()
+        if not isinstance(value, dict) or (keys != legacy_fields and keys != current_fields):
+            raise ValueError
+        old_release = value["previous_release"]
+        old_marker = value["previous_marker_sha"]
+        intended_release = value["intended_release_sha"]
+        state = value.get("state", "switching")
+        if (
+            not isinstance(old_release, str)
+            or not 1 <= len(old_release) <= 128
+            or not SHA_PATTERN.fullmatch(old_marker)
+            or not SHA_PATTERN.fullmatch(intended_release)
+            or state not in {"switching", "rolled_back"}
+        ):
+            raise ValueError
+        return old_release, old_marker, intended_release, state
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        raise DeploymentFailure("manual_intervention_required") from None
+
+
+def _mark_switch_journal_rolled_back(path: Path, old_release: str, old_marker: str, intended_release: str) -> None:
+    _write_switch_journal(path, old_release, old_marker, intended_release, state="rolled_back")
+
+
+def _clear_switch_journal(path: Path) -> None:
+    try:
+        status = path.lstat()
+        if not stat.S_ISREG(status.st_mode):
+            raise OSError
+        path.unlink()
+        _fsync_parent(path.parent)
+    except OSError:
+        raise DeploymentFailure("manual_intervention_required") from None
 
 
 def _safe_code(value: str, fallback: str) -> str:

@@ -85,7 +85,7 @@ class OperationRecord:
     phase: str
     timestamps: dict[str, str]
     previous_release: str | None = None
-    backup_release_id: str | None = None
+    backup_configuration_id: str | None = None
     backup_database_id: str | None = None
     migration_applied: bool = False
     diagnostic_code: str = "pending"
@@ -152,7 +152,7 @@ class OperationRecord:
         *,
         result: str | None = None,
         previous_release: str | None = None,
-        backup_release_id: str | None = None,
+        backup_configuration_id: str | None = None,
         backup_database_id: str | None = None,
         migration_applied: bool | None = None,
         deployment_date: str | None = None,
@@ -171,7 +171,7 @@ class OperationRecord:
             phase=phase,
             timestamps=timestamps,
             previous_release=previous_release if previous_release is not None else self.previous_release,
-            backup_release_id=backup_release_id if backup_release_id is not None else self.backup_release_id,
+            backup_configuration_id=backup_configuration_id if backup_configuration_id is not None else self.backup_configuration_id,
             backup_database_id=backup_database_id if backup_database_id is not None else self.backup_database_id,
             migration_applied=migration_applied if migration_applied is not None else self.migration_applied,
             diagnostic_code=diagnostic_code,
@@ -190,7 +190,7 @@ class OperationRecord:
             "phase": self.phase,
             "timestamps": self.timestamps,
             "previous_release": self.previous_release,
-            "backup_release_id": self.backup_release_id,
+            "backup_configuration_id": self.backup_configuration_id,
             "backup_database_id": self.backup_database_id,
             "migration_applied": self.migration_applied,
             "diagnostic_code": self.diagnostic_code,
@@ -202,7 +202,7 @@ class OperationRecord:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> OperationRecord:
         """Load and validate an operation record without preserving extra input fields."""
-        expected = {
+        common = {
             "operation_id",
             "idempotency_key",
             "target",
@@ -210,7 +210,6 @@ class OperationRecord:
             "phase",
             "timestamps",
             "previous_release",
-            "backup_release_id",
             "backup_database_id",
             "migration_applied",
             "diagnostic_code",
@@ -218,7 +217,10 @@ class OperationRecord:
             "deployed_release_id",
             "previous_marker_sha",
         }
-        if set(value) != expected or not isinstance(value.get("target"), dict) or not isinstance(value.get("timestamps"), dict):
+        canonical = common | {"backup_configuration_id"}
+        legacy = common | {"backup_release_id"}
+        keys = set(value)
+        if (keys != canonical and keys != legacy) or not isinstance(value.get("target"), dict) or not isinstance(value.get("timestamps"), dict):
             raise StateError("state_invalid")
         try:
             return cls(
@@ -229,7 +231,7 @@ class OperationRecord:
                 phase=value["phase"],
                 timestamps=value["timestamps"],
                 previous_release=value["previous_release"],
-                backup_release_id=value["backup_release_id"],
+                backup_configuration_id=value.get("backup_configuration_id", value.get("backup_release_id")),
                 backup_database_id=value["backup_database_id"],
                 migration_applied=value["migration_applied"],
                 diagnostic_code=value["diagnostic_code"],
