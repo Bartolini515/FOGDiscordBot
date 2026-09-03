@@ -50,21 +50,14 @@ CI never starts `main.py`, reads `.env`, `configuration.json`, or `db/bot.db`, a
 
 ## Migration failures
 
-Migrations are an offline deployment phase. Run the explicit command against the intended database before starting the bot:
-
-```text
-python -m scripts.migrate --database <path>
-python -m scripts.migrate --database <path> --check
-```
-
-`--check` makes no schema changes and exits nonzero when committed migrations are pending. `Database.connect()` never applies migrations; it refuses a database that is not current. Check:
+`Database.connect()` runs yoyo before opening the long-lived application connection. Check:
 
 - the process can write the database directory;
 - the migration table and error mention in the log;
 - no applied `001`/`002` file was edited;
 - the same database is not being written by another bot process.
 
-Reproduce schema changes only with a new database in a temporary directory. Do not point tests, experiments, or repair commands at `db/bot.db`. Never remove yoyo history or edit an applied migration file to force a retry; applied migration files are immutable, so add a new forward migration instead.
+Reproduce schema changes only with a new database in a temporary directory. Do not point tests, experiments, or repair commands at `db/bot.db`. Never remove yoyo history or edit an applied migration to force a retry; add a new forward migration.
 
 ## Commands are missing
 
@@ -121,12 +114,6 @@ logs/bot.log
 ```
 
 Review only the minimum relevant lines and anonymize member names, Discord IDs, ticket titles/content, warning reasons, and channel/message data before sharing. Logs may contain operational details even when they do not contain the token.
-
-## Runtime readiness or duplicate instance
-
-The application takes an exclusive instance lock before opening SQLite or contacting Discord. A second process using the same `FOGBOT_INSTANCE_LOCK` exits rather than waiting. Stop the stale local process before investigating its runtime directory; do not delete a lock while a process may still be active.
-
-`ready.json` is created in `FOGBOT_RUNTIME_DIR` only after the bot has connected and completed startup reconciliation. It is removed on disconnect or graceful shutdown. A release SHA of `unknown` is expected for local development without a valid `RELEASE_SHA` file. Runtime paths and health-state fields are described in [Configuration](configuration.md#runtime-paths); do not put production paths or record contents in issues.
 
 ## Read-only service diagnosis
 
