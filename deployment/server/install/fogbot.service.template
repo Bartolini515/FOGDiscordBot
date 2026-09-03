@@ -8,7 +8,17 @@ Wants=network-online.target
 Type=simple
 User=<FOGBOT_USER>
 Group=<FOGBOT_GROUP>
-EnvironmentFile=-/etc/fogbot/fogbot.env
+# Fail closed when the external Discord credentials file is absent; otherwise
+# main.py could try to create a mutable .env inside the release directory.
+EnvironmentFile=/etc/fogbot/fogbot.env
+# Keep mutable production state outside the immutable release. Replace each
+# placeholder with the paths verified during the server inspection.
+Environment=FOGBOT_CONFIG_PATH=<FOGBOT_CONFIG_PATH>
+Environment=FOGBOT_DB_PATH=<FOGBOT_DB_PATH>
+Environment=FOGBOT_LOG_DIR=<FOGBOT_LOG_DIR>
+Environment=FOGBOT_RUNTIME_DIR=<FOGBOT_RUNTIME_DIR>
+Environment=FOGBOT_RELEASE_FILE=<FOGBOT_RELEASE_FILE>
+Environment=FOGBOT_INSTANCE_LOCK=<FOGBOT_INSTANCE_LOCK>
 WorkingDirectory=/opt/fogbot/current
 ExecStart=/opt/fogbot/current/.venv/bin/python /opt/fogbot/current/main.py
 Restart=on-failure
