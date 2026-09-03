@@ -1,3 +1,0 @@
-# Optional template only; replace placeholders after read-only inspection.
-u <FOGBOT_USER> - "FogBot service account" /opt/fogbot
-g <FOGBOT_GROUP> -

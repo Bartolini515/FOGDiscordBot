@@ -3,15 +3,13 @@ from pathlib import Path
 
 import pytest_asyncio
 
-from db.database import Database, apply_committed_migrations
+from db.database import Database
 
 
 @pytest_asyncio.fixture
 async def database(tmp_path: Path) -> AsyncIterator[Database]:
     """Provide a migrated SQLite database isolated from production data."""
-    path = tmp_path / "bot.db"
-    apply_committed_migrations(path)
-    db = Database(str(path))
+    db = Database(str(tmp_path / "bot.db"))
     await db.connect()
     try:
         yield db

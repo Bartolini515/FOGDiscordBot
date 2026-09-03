@@ -9,39 +9,35 @@ FogDiscordBot is a single-process `discord.py` application for one FOG Discord g
 - `utils/` contains stateless helpers shared across cogs and services.
 - `services/` contains typed, explicit-dependency workflow functions grouped by domain.
 - `Cogs/` contains Discord slash commands, listeners, views, and background loops.
-- `db/database.py` owns the SQLite connection and verifies that its schema is current.
+- `db/database.py` owns the SQLite connection and yoyo migration step.
 - `db/models/` contains asynchronous, SQL-oriented data access classes, with one model class per module.
 - `db/migrations/` is the immutable history of the database schema.
 - `ticket/` contains ticket categories, handlers, and Discord UI components.
-- `scripts/check.py` is the portable local quality entry point; `scripts/migrate.py` is the offline migration entry point.
+- `scripts/check.py` is the portable local quality entry point.
 - `tests/` exercises configuration and domain behavior without connecting to Discord.
 
 ## Process lifecycle
 
 ```mermaid
 flowchart TD
-    A["Run main.py"] --> B["Resolve runtime paths"]
+    A["Run main.py"] --> B["Load .env"]
     B --> C{"configuration.json exists?"}
     C -- No --> D["Copy configuration.example.json"]
     D --> E["Exit and ask the operator to configure it"]
-    C -- Yes --> F["Validate configuration and load .env"]
-    F --> G["Acquire instance lock"]
-    G --> H["Create MyBot and Database"]
-    H --> I["setup_hook"]
-    I --> J["Verify no committed migrations are pending"]
-    J --> K["Open aiosqlite connection and enable foreign keys"]
-    K --> L["Load every Cogs/*.py extension"]
-    L --> M["Start autosave and readiness heartbeat tasks"]
-    M --> N["Sync application commands to the configured guild"]
-    N --> O["on_ready: reconcile users, then publish readiness"]
-    O --> P["Serve Discord events and interactions"]
-    P --> Q["disconnect: invalidate readiness"]
-    P --> R["close: invalidate, cancel tasks, save, close, release lock"]
+    C -- Yes --> F["Validate configuration"]
+    F --> G["Create MyBot and Database"]
+    G --> H["setup_hook"]
+    H --> I["Apply yoyo migrations"]
+    I --> J["Open aiosqlite connection and enable foreign keys"]
+    J --> K["Load every Cogs/*.py extension"]
+    K --> L["Start hourly configuration autosave"]
+    L --> M["Sync application commands to the configured guild"]
+    M --> N["on_ready: reconcile guild members with users"]
+    N --> O["Serve Discord events and interactions"]
+    O --> P["close: save configuration and close SQLite"]
 ```
 
-`main.py` uses all Discord intents and copies the application command tree into `guild_id`. This deliberately targets the single FOG guild instead of globally publishing commands. Cog modules are discovered from the filesystem and loaded as extensions, so a new cog becomes part of startup automatically when it provides the normal `setup(bot)` entry point. Importing `main.py` has no startup side effects; the callable `main()` owns configuration bootstrap, environment loading, instance locking, and Discord startup.
-
-Before creating the database connection or contacting Discord, `main()` acquires the configured exclusive runtime lock. The runtime path contract is documented in [Configuration](configuration.md#runtime-paths). `ready.json` is atomically written only after `on_ready` completes member reconciliation, refreshed while Discord remains ready, and removed on disconnect and shutdown. Autosave and heartbeat tasks are cancelled during shutdown; the lock is released only after Discord shutdown completes.
+`main.py` uses all Discord intents and copies the application command tree into `guild_id`. This deliberately targets the single FOG guild instead of globally publishing commands. Cog modules are discovered from the filesystem and loaded as extensions, so a new cog becomes part of startup automatically when it provides the normal `setup(bot)` entry point.
 
 Cog classes remain the Discord interaction boundary: decorators, persistent views, locks, and component registration stay in `Cogs/`. Stateless cross-cutting operations live in `utils/`, while multi-step workflows live in `services/` and receive their dependencies explicitly. This separation changes code organization only; command names, responses, permissions, model calls, and side-effect ordering remain the same.
 
@@ -65,11 +61,9 @@ An hourly background loop writes the in-memory configuration dictionary to `conf
 
 ## SQLite and migrations
 
-Migrations are an offline deployment phase, separate from the bot process. Before starting the bot, an operator must explicitly select a database and run `python -m scripts.migrate --database <path>`. `python -m scripts.migrate --database <path> --check` reports pending committed migrations without making schema changes. This entry point does not import Discord code or infer a database path.
+`Database.connect()` applies every pending yoyo migration before opening the long-lived `aiosqlite` connection. The connection then executes `PRAGMA foreign_keys = ON`; this must remain enabled for the documented cascades and `SET NULL` behavior.
 
-`Database.connect()` never applies migrations. It refuses to open a database with pending committed migrations and directs the operator to the offline command. For a current database, it opens the long-lived `aiosqlite` connection and executes `PRAGMA foreign_keys = ON`; this must remain enabled for the documented cascades and `SET NULL` behavior.
-
-The committed migrations are the schema source of truth. Applied migration files are immutable: never edit or delete them. Add schema changes as the next numbered migration and validate them against a new temporary database. Tests do not use `db/bot.db`.
+The committed migrations are the schema source of truth. Applied migrations must never be edited. Add schema changes as the next numbered migration and validate them against a new temporary database. Tests do not use `db/bot.db`.
 
 Model classes in `db/models/` are thin asynchronous query collections. They commit writes themselves and normally return positional SQLite rows rather than named domain objects. Consult [Data model](data-model.md) before changing query columns or destructuring call sites.
 
