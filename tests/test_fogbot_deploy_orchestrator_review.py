@@ -83,7 +83,6 @@ def test_fixed_adapters_prepare_a_release_local_python_312_environment_and_exact
     assert adapters.migrations.validate(release, layout.database, 30) is True
 
     commands = [call[1] for call in runner.calls]
-    assert ("-C", layout.source_repository.as_posix(), "fetch", "--no-tags", "origin", "main") in commands
     assert ("-C", layout.source_repository.as_posix(), "cat-file", "-t", SHA) in commands
     assert ("-C", layout.source_repository.as_posix(), "worktree", "add", "--detach", release.path.as_posix(), SHA) in commands
     assert ("-C", release.path.as_posix(), "rev-parse", "HEAD") in commands

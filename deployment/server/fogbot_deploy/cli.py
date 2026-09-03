@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import json
 import os
 import sys
-from typing import Protocol, Sequence, TextIO
+from typing import Protocol, TextIO
 
 from .metadata import CurrentMetadata
 from .protocol import CurrentRequest, CommandError, StatusRequest, SubmitRequest, operation_id_for, parse_command
@@ -125,39 +125,6 @@ def run_from_ssh_original_command(
     """Read only SSH_ORIGINAL_COMMAND, write compact JSON, and return its controlled code."""
     environment = os.environ if environ is None else environ
     response = handler.handle(environment.get("SSH_ORIGINAL_COMMAND"))
-    return _write_response(response, stdout=stdout, stderr=stderr)
-
-
-def run_from_argv(
-    handler: ForcedCommandHandler,
-    argv: Sequence[str],
-    *,
-    stdout: TextIO | None = None,
-    stderr: TextIO | None = None,
-) -> int:
-    """Process one strict argv command without invoking a shell.
-
-    The root-owned helper is normally called by ``sudo`` with this interface.
-    Joining already-separated arguments is safe here because ``parse_command``
-    applies the same exact grammar and rejects shell metacharacters, empty
-    tokens, and all unexpected shapes.  SSH forced-command callers continue to
-    use :func:`run_from_ssh_original_command` unchanged.
-    """
-    if isinstance(argv, (str, bytes)) or any(not isinstance(token, str) for token in argv):
-        command = None
-    else:
-        command = " ".join(argv)
-    response = handler.handle(command)
-    return _write_response(response, stdout=stdout, stderr=stderr)
-
-
-def _write_response(
-    response: CommandResponse,
-    *,
-    stdout: TextIO | None = None,
-    stderr: TextIO | None = None,
-) -> int:
-    """Emit one redacted response through the caller-supplied streams."""
     output = sys.stdout if stdout is None else stdout
     errors = sys.stderr if stderr is None else stderr
     print(response.stdout, file=output, flush=True)

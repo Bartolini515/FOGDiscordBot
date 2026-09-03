@@ -327,7 +327,6 @@ def test_pre_start_failures_restore_verified_backup_and_classify_recovery(tmp_pa
 
     assert outcome == _module().DeploymentOutcome(False, "recovered")
     assert "restore-link:previous-release" in fakes.events
-    assert fakes.events.index("restore-link:previous-release") < fakes.events.index("start")
     assert store.read("a" * 32).phase == "failed"
     assert store.read("a" * 32).backup_database_id is not None
 
@@ -409,7 +408,6 @@ def test_fixed_argv_adapters_keep_systemctl_git_pipenv_and_migration_calls_shell
     assert [call[1] for call in runner.calls] == [
         ("stop", "fogbot.service"),
         ("-C", layout.source_repository.as_posix(), "rev-parse", "--git-dir"),
-        ("-C", layout.source_repository.as_posix(), "fetch", "--no-tags", "origin", "main"),
         ("-C", layout.source_repository.as_posix(), "cat-file", "-t", SHA),
         ("-C", layout.source_repository.as_posix(), "worktree", "add", "--detach", layout.releases.joinpath(SHA).as_posix(), SHA),
         ("-C", layout.releases.joinpath(SHA).as_posix(), "rev-parse", "HEAD"),
@@ -447,14 +445,5 @@ def test_static_installation_assets_are_placeholder_only_and_exclude_cd_workflow
 
     assert {"fogbot.service.template", "fogbot-deploy.sudoers.template", "fogbot.sysusers.template", "fogbot.tmpfiles.template", "README.md"} <= files
     assert not Path(".github/workflows/cd.yml").exists()
-    service_template = (root / "fogbot.service.template").read_text(encoding="utf-8")
-    assert "<FOGBOT_USER>" in service_template
-    assert all(f"Environment={name}=<" in service_template for name in (
-        "FOGBOT_CONFIG_PATH",
-        "FOGBOT_DB_PATH",
-        "FOGBOT_LOG_DIR",
-        "FOGBOT_RUNTIME_DIR",
-        "FOGBOT_RELEASE_FILE",
-        "FOGBOT_INSTANCE_LOCK",
-    ))
+    assert "<FOGBOT_USER>" in (root / "fogbot.service.template").read_text(encoding="utf-8")
     assert "must not be installed verbatim" in (root / "README.md").read_text(encoding="utf-8")

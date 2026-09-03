@@ -444,13 +444,6 @@ class DeploymentOrchestrator:
             _write_sha_marker(self._layout.sha_marker, snapshot.previous_marker_sha)
             if self._dependencies.switcher.current_release_id() != snapshot.previous_release or _read_sha_marker(self._layout.sha_marker) != snapshot.previous_marker_sha:
                 raise ValueError
-            # The service was already stopped before the snapshot was taken.
-            # Restore the verified pre-deployment state first, then bring that
-            # release back up before reporting recovery.  A restored link and
-            # database with an inactive service is not a successful recovery.
-            self._dependencies.service.start(self._policy.startup_timeout_seconds)
-            if not self._dependencies.service.is_active(self._policy.startup_timeout_seconds):
-                raise DeploymentFailure("start_failed")
         except (DeploymentFailure, TransactionError, OSError, ValueError, TypeError):
             self._persist_final(record, "manual_intervention", "manual_intervention_required")
             return DeploymentOutcome(False, "manual_intervention_required")
@@ -492,19 +485,6 @@ class _FixedPreparer:
         source = self._layout.source_repository
         _require(
             _fixed(self._runner, "/usr/bin/git", ("-C", _arg_path(source), "rev-parse", "--git-dir"), source, timeout_seconds),
-            "release_preparation_failed",
-        )
-        # The source mirror may not yet contain the exact CI-approved commit.
-        # Refresh only the trusted origin's main ref with fixed arguments; the
-        # public verifier remains the authority for which SHA may be deployed.
-        _require(
-            _fixed(
-                self._runner,
-                "/usr/bin/git",
-                ("-C", _arg_path(source), "fetch", "--no-tags", "origin", "main"),
-                source,
-                timeout_seconds,
-            ),
             "release_preparation_failed",
         )
         commit_type = execute_command(
