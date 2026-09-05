@@ -13,7 +13,7 @@ FogDiscordBot is a single-process `discord.py` application for one FOG Discord g
 - `db/models/` contains asynchronous, SQL-oriented data access classes, with one model class per module.
 - `db/migrations/` is the immutable history of the database schema.
 - `ticket/` contains ticket categories, handlers, and Discord UI components.
-- `scripts/check.py` is the portable local quality entry point.
+- `scripts/check.py` is the portable local quality entry point; `scripts/update.sh` is the controlled service update entry point.
 - `tests/` exercises configuration and domain behavior without connecting to Discord.
 
 ## Process lifecycle
@@ -58,6 +58,10 @@ Mission services own roster rendering, command/stored-date parsing, the 12-hour 
 The `on_ready` reconciliation marks every database user as off-guild, then inserts or updates the current non-bot guild members as present. It preserves historical users for attendance, warning, and mission references.
 
 An hourly background loop writes the in-memory configuration dictionary to `configuration.json`. The same save happens during graceful shutdown. Commands that edit configuration therefore change the shared dictionary first and rely on this lifecycle for persistence.
+
+## Service update helper
+
+The Linux-only `scripts/update.sh` coordinates the external process lifecycle around a code update. It verifies a clean Git branch with an upstream, stops `fogbot.service` through `sudo`, waits for systemd to report `inactive`, updates `technical_info` in the ignored `configuration.json`, fast-forwards the branch, starts the service, and verifies `active`. It has no automatic rollback; after a confirmed stop, failures leave the service stopped for operator inspection.
 
 ## SQLite and migrations
 

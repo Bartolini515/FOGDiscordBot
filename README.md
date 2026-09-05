@@ -62,6 +62,17 @@ GitHub Actions runs the same quality contract for pull requests targeting `main`
 
 Tests use temporary migrated SQLite databases. They do not read `db/bot.db`, require a token, or connect to Discord.
 
+## Update the deployed service
+
+On the Linux host that runs the approved `fogbot.service`, use the deployment helper from a clean checkout with an upstream tracking branch:
+
+```text
+chmod +x scripts/update.sh
+./scripts/update.sh
+```
+
+The helper stops the service, asks for a `core.major.minor` version such as `1.23.45`, writes that version and the current `YYYY-MM-DD` date to `technical_info`, fast-forwards the checkout with `git pull --ff-only`, and starts the service again. It requires `git`, `python3`, `sudo`, and `systemctl`, and waits up to 120 seconds for systemd to confirm the stop. Once the stop is confirmed, a failure or interruption leaves the service stopped so the operator can inspect the host before restarting it.
+
 ## Architecture at a glance
 
 `main.py` validates local configuration, owns the bot/database lifecycle, discovers cogs, synchronizes commands to the one FOG guild, reconciles guild members, and saves mutable configuration. Cogs handle Discord interactions and call thin asynchronous models in `db/models/`. Migrations in `db/migrations/` define the SQLite schema. Mission, training, and ticket cogs reconstruct persistent component views from stored records during cog loading.
@@ -75,7 +86,7 @@ See [Architecture](docs/architecture.md) and [Mission domain](docs/domain/missio
 - `Cogs/` — Discord slash commands, listeners, background tasks, and views.
 - `db/` — SQLite connection, query models, and immutable yoyo migrations.
 - `ticket/` — ticket category contract, handlers, and UI components.
-- `scripts/` — portable developer checks.
+- `scripts/` — developer checks and the controlled service update helper.
 - `tests/` — offline tests using temporary resources.
 - `docs/` — technical and domain documentation.
 - `AGENTS.md` — repository rules and source-of-truth map for AI coding agents.
@@ -94,4 +105,4 @@ See [Architecture](docs/architecture.md) and [Mission domain](docs/domain/missio
 
 The CI pipeline runs the offline quality checks, but there is no automated Discord integration suite. The first mandatory mypy scope covers configuration, database, ticket, and script code rather than cogs. Time values are naive and server-local, models return positional tuples, and several historical schema/behavior limitations are recorded in the technical documents.
 
-Production deployment and service restart procedures are intentionally outside this repository guide. Any write to Discord, real configuration/database, systemd, or production requires separate operator approval.
+The service update helper documents the controlled deployment flow, but running it against a real host remains an operator action. The CI pipeline and automated tests never access the production configuration, database, systemd, or Discord.

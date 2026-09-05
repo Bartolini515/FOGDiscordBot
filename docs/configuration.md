@@ -126,7 +126,7 @@ The listener ignores disabled or empty-keyword entries. Cooldowns are in-memory 
 
 - `messages.welcome_message` can use `{mention}` and is sent on member arrival.
 - `messages.recruitment_message` and `messages.szwi_message` are used by their respective commands.
-- `technical_info.version` and `technical_info.last_updated` are displayed by `/info`; `current_run_date` is maintained by startup.
+- `technical_info.version` and `technical_info.last_updated` are displayed by `/info`; `current_run_date` is maintained by startup. `scripts/update.sh` writes versions in `core.major.minor` form (for example `1.23.45`) and writes `last_updated` as the server's local `YYYY-MM-DD` date.
 - `leveling_system.notifications_off_users` is a list of member IDs. `/level_notifications` updates it.
 
 ## Honeypot state

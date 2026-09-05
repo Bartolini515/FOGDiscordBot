@@ -115,7 +115,7 @@ logs/bot.log
 
 Review only the minimum relevant lines and anonymize member names, Discord IDs, ticket titles/content, warning reasons, and channel/message data before sharing. Logs may contain operational details even when they do not contain the token.
 
-## Read-only service diagnosis
+## Service diagnosis and update
 
 The known production unit is `fogbot.service`. These commands inspect state only:
 
@@ -124,7 +124,13 @@ systemctl status fogbot.service
 journalctl -u fogbot.service --since "1 hour ago" --no-pager
 ```
 
-Do not run `start`, `stop`, `restart`, `enable`, `disable`, `daemon-reload`, deployment scripts, or `git pull` without separate explicit approval. The current documentation does not define a production deployment procedure.
+For an approved update window, run the repository helper from a clean checkout with an upstream tracking branch:
+
+```text
+./scripts/update.sh
+```
+
+It stops `fogbot.service`, waits until systemd reports `inactive` (up to 120 seconds), validates the requested `core.major.minor` version, updates `configuration.json`, fast-forwards the current branch, and starts the service. The helper uses `sudo` for the stop and start operations. It does not switch branches, install dependencies, or roll back automatically. Once the stop is confirmed, a failure or interruption leaves the service stopped; earlier failures leave the service untouched, while a stop timeout requires checking the actual systemd state. Inspect the reported stage and the read-only logs before deciding whether to start it manually.
 
 ## Known limitations
 
@@ -137,4 +143,4 @@ Do not run `start`, `stop`, `restart`, `enable`, `disable`, `daemon-reload`, dep
 - `training_signed` has no uniqueness constraint for a user/training pair.
 - Editing only a mission name follows a known defective path.
 - Proposal forwarding assumes the expected proposal message content exists.
-- A deployment/runbook and production rollback process are intentionally deferred.
+- The update helper has no automatic rollback; restore the previous checkout and configuration only through the host's approved operator procedure.
