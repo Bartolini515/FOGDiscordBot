@@ -7,6 +7,7 @@ readonly STOP_TIMEOUT_SECONDS="${FOGBOT_STOP_TIMEOUT_SECONDS:-120}"
 readonly PYTHON_BIN="${FOGBOT_PYTHON_BIN:-python3}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+readonly SCRIPT_RELATIVE_PATH="scripts/update.sh"
 readonly CONFIG_FILE="$REPO_DIR/configuration.json"
 
 stage="initialization"
@@ -48,7 +49,21 @@ branch="$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || tr
 [[ -n "$branch" ]] || fail "the repository is in detached HEAD state"
 upstream="$(git -C "$REPO_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
 [[ -n "$upstream" ]] || fail "the current branch has no upstream"
-[[ -z "$(git -C "$REPO_DIR" status --porcelain)" ]] || fail "the Git worktree contains local changes"
+if ! worktree_status="$(git -C "$REPO_DIR" status --porcelain)"; then
+    fail "could not inspect the Git worktree"
+fi
+if [[ -n "$worktree_status" ]]; then
+    while IFS= read -r status_line; do
+        [[ -z "$status_line" ]] && continue
+        if [[ "$status_line" != " M $SCRIPT_RELATIVE_PATH" ]]; then
+            fail "the Git worktree contains local changes"
+        fi
+        current_script_blob="$(git -C "$REPO_DIR" hash-object -- "$SCRIPT_RELATIVE_PATH" 2>/dev/null || true)"
+        head_script_blob="$(git -C "$REPO_DIR" rev-parse "HEAD:$SCRIPT_RELATIVE_PATH" 2>/dev/null || true)"
+        [[ -n "$current_script_blob" && "$current_script_blob" == "$head_script_blob" ]] \
+            || fail "scripts/update.sh has content changes; only its executable bit may differ"
+    done <<< "$worktree_status"
+fi
 
 stage="checking configuration"
 if ! "$PYTHON_BIN" - "$CONFIG_FILE" <<'PY'

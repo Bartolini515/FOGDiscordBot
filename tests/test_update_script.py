@@ -121,6 +121,22 @@ esac
     return repo, commands, log
 
 
+def _make_git_report_only_script_mode_change(commands: Path) -> None:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    _write_executable(
+        commands / "git",
+        f'''#!/usr/bin/env bash
+set -eu
+if [[ "${{1:-}}" == "-C" && "${{3:-}}" == "status" && "${{4:-}}" == "--porcelain" ]]; then
+  printf ' M scripts/update.sh\\n'
+  exit 0
+fi
+exec {_msys_path(Path(real_git))!r} "$@"
+''',
+    )
+
+
 def _python_command() -> str:
     executable = Path(sys.executable).resolve()
     return _msys_path(executable)
@@ -178,6 +194,28 @@ def test_update_script_does_not_stop_service_with_dirty_worktree(tmp_path: Path)
 
     assert result.returncode != 0
     assert "worktree contains local changes" in result.stderr
+    assert not log.exists()
+
+
+def test_update_script_allows_its_executable_bit_change(tmp_path: Path) -> None:
+    repo, commands, _ = _prepare_repo(tmp_path)
+    _make_git_report_only_script_mode_change(commands)
+
+    result = _run_update(repo, commands, "1.23.45\n")
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_update_script_rejects_content_change_to_itself(tmp_path: Path) -> None:
+    repo, commands, log = _prepare_repo(tmp_path)
+    _make_git_report_only_script_mode_change(commands)
+    script = repo / "scripts" / "update.sh"
+    script.write_text(script.read_text(encoding="utf-8") + "# local change\n", encoding="utf-8")
+
+    result = _run_update(repo, commands, "1.23.45\n")
+
+    assert result.returncode != 0
+    assert "content changes" in result.stderr
     assert not log.exists()
 
 
