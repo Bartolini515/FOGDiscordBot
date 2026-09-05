@@ -171,6 +171,10 @@ def test_update_script_stops_updates_and_starts_service(tmp_path: Path) -> None:
     result = _run_update(repo, commands, "1.23.45\n")
 
     assert result.returncode == 0, result.stderr + result.stdout
+    assert "Current version: 1.0.0" in result.stdout
+    assert result.stdout.index("Current version: 1.0.0") < result.stdout.index(
+        "Enter version (core.major.minor):"
+    )
     configuration = json.loads((repo / "configuration.json").read_text(encoding="utf-8"))
     assert configuration["technical_info"] == {
         "version": "1.23.45",

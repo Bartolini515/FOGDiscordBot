@@ -61,7 +61,7 @@ An hourly background loop writes the in-memory configuration dictionary to `conf
 
 ## Service update helper
 
-The Linux-only `scripts/update.sh` coordinates the external process lifecycle around a code update. It verifies a clean Git branch with an upstream, allows only a content-identical executable-bit change to its own file, stops `fogbot.service` through `sudo`, waits for systemd to report `inactive`, updates `technical_info` in the ignored `configuration.json`, fast-forwards the branch, starts the service, and verifies `active`. It has no automatic rollback; after a confirmed stop, failures leave the service stopped for operator inspection.
+The Linux-only `scripts/update.sh` coordinates the external process lifecycle around a code update. It verifies a clean Git branch with an upstream, allows only a content-identical executable-bit change to its own file, stops `fogbot.service` through `sudo`, waits for systemd to report `inactive`, displays the current version, updates `technical_info` in the ignored `configuration.json`, fast-forwards the branch, starts the service, and verifies `active`. It has no automatic rollback; after a confirmed stop, failures leave the service stopped for operator inspection.
 
 ## SQLite and migrations
 

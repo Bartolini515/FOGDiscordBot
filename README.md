@@ -71,7 +71,7 @@ chmod +x scripts/update.sh
 ./scripts/update.sh
 ```
 
-The helper stops the service, asks for a `core.major.minor` version such as `1.23.45`, writes that version and the current `YYYY-MM-DD` date to `technical_info`, fast-forwards the checkout with `git pull --ff-only`, and starts the service again. It requires `git`, `python3`, `sudo`, and `systemctl`, and waits up to 120 seconds for systemd to confirm the stop. A mode-only change caused by `chmod +x scripts/update.sh` is accepted when the file content still matches `HEAD`; all other local changes stop the process. Once the stop is confirmed, a failure or interruption leaves the service stopped so the operator can inspect the host before restarting it.
+The helper stops the service, shows the current `technical_info.version`, asks for a new `core.major.minor` version such as `1.23.45`, writes that version and the current `YYYY-MM-DD` date to `technical_info`, fast-forwards the checkout with `git pull --ff-only`, and starts the service again. It requires `git`, `python3`, `sudo`, and `systemctl`, and waits up to 120 seconds for systemd to confirm the stop. A mode-only change caused by `chmod +x scripts/update.sh` is accepted when the file content still matches `HEAD`; all other local changes stop the process. Once the stop is confirmed, a failure or interruption leaves the service stopped so the operator can inspect the host before restarting it.
 
 ## Architecture at a glance
 

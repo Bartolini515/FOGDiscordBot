@@ -66,7 +66,7 @@ if [[ -n "$worktree_status" ]]; then
 fi
 
 stage="checking configuration"
-if ! "$PYTHON_BIN" - "$CONFIG_FILE" <<'PY'
+if ! current_version="$("$PYTHON_BIN" - "$CONFIG_FILE" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -77,8 +77,12 @@ with path.open(encoding="utf-8") as config_file:
 
 if not isinstance(data, dict) or not isinstance(data.get("technical_info"), dict):
     raise ValueError("technical_info must be a JSON object")
+version = data["technical_info"].get("version")
+if not isinstance(version, str) or not version:
+    version = "Unknown"
+print(version)
 PY
-then
+)"; then
     fail "configuration.json is not valid or has no technical_info object"
 fi
 
@@ -100,6 +104,7 @@ while true; do
 done
 
 stage="reading version"
+printf 'Current version: %s\n' "$current_version"
 while true; do
     printf 'Enter version (core.major.minor): '
     if ! IFS= read -r version; then
